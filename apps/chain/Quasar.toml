@@ -1,0 +1,9 @@
+[project]
+name = "ummo_market"
+
+[toolchain]
+type = "solana"
+
+[testing]
+framework = "none"
+

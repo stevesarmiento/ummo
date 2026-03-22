@@ -1,0 +1,39 @@
+# dependencies
+node_modules
+
+# turbo
+.turbo
+
+# next.js
+.next
+out
+
+# build outputs
+dist
+coverage
+
+# env files (convex creates packages/backend/.env.local)
+.env
+.env.*.local
+.env.local
+
+# OS
+.DS_Store
+
+# rust / cargo (local caches)
+.cargo/
+
+# anchor / solana
+apps/chain/target
+apps/chain/.anchor
+apps/chain/test-ledger
+apps/chain/**/target
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+.agents/

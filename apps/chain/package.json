@@ -1,0 +1,16 @@
+{
+  "name": "@ummo/chain",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "scripts": {
+    "build": "quasar build",
+    "deploy": "quasar deploy",
+    "idl": "quasar idl .",
+    "lint:fix": "prettier . --write",
+    "lint": "prettier . --check"
+  },
+  "devDependencies": {
+    "prettier": "^2.6.2"
+  }
+}

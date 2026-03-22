@@ -1,0 +1,17 @@
+{
+  "name": "@ummo/backend",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "convex dev",
+    "setup": "convex dev --until-success",
+    "typecheck": "tsc --noEmit -p convex"
+  },
+  "dependencies": {
+    "convex": "^1.29.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}
+
