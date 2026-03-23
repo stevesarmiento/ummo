@@ -29,4 +29,3 @@ Outputs:
 
 - Quasar project config lives in `Quasar.toml`.
 - Legacy Anchor scaffold (`Anchor.toml`, `migrations/`, `tests/`, `programs/ummo_market/`) is kept temporarily for reference while we port the program surface area.
-

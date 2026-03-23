@@ -16,7 +16,7 @@ debug = ["quasar-lang/debug"]
 
 [dependencies]
 quasar-lang = "0.0.0"
-percolator = { path = "../../crates/percolator-kernel" }
+percolator = { path = "../../crates/percolator-kernel", features = ["host"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

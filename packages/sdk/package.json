@@ -7,11 +7,11 @@
     ".": "./src/index.ts"
   },
   "scripts": {
+    "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@coral-xyz/anchor": "^0.32.1",
-    "@solana/web3.js": "^1.98.0"
+    "@solana/kit": "^5.0.0"
   },
   "devDependencies": {
     "typescript": "^5.9.3"
