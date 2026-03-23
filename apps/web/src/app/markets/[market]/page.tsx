@@ -2,7 +2,7 @@ import Link from "next/link"
 import { notFound } from "next/navigation"
 
 import { MarketClient } from "@/components/markets/market-client"
-import { ConnectButton } from "@/components/wallet/connect-button"
+import { ConnectButton } from "@/components/connector"
 import { convexQuery } from "@/lib/convex-http"
 
 interface MarketDoc {

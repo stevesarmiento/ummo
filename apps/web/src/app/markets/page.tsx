@@ -1,6 +1,6 @@
 import Link from "next/link"
 
-import { ConnectButton } from "@/components/wallet/connect-button"
+import { ConnectButton } from "@/components/connector"
 import { convexQuery } from "@/lib/convex-http"
 
 interface MarketDoc {
