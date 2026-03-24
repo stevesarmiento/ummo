@@ -6,6 +6,7 @@ pub mod keeper_crank;
 pub mod liquidate_at_oracle;
 pub mod open_trader;
 pub mod set_matcher_authority;
+pub mod test_writable;
 pub mod withdraw;
 
 pub use deposit::*;
@@ -16,5 +17,6 @@ pub use keeper_crank::*;
 pub use liquidate_at_oracle::*;
 pub use open_trader::*;
 pub use set_matcher_authority::*;
+pub use test_writable::*;
 pub use withdraw::*;
 
