@@ -8,7 +8,7 @@ import {
 } from "@solana/kit"
 
 export const UMMO_MARKET_PROGRAM_ID = address(
-  "4AboEjY4zXBF5QmDQCPT4XnaaU3pEGnCDuVy5HzR9T8e",
+  "EMN8q6Lz1uhBqJusVygXxQvcFt3tmFCB4hnpk2Bbhymu",
 )
 
 export const UMMO_MARKET_PROGRAM_ADDRESS = UMMO_MARKET_PROGRAM_ID
@@ -124,6 +124,36 @@ export async function getAssociatedTokenAddress(args: {
     ],
   })
   return ata
+}
+
+export function getInitMarketInstruction(args: {
+  payer: Address
+  collateralMint: Address
+  oracleFeed: Address
+  matcherAuthority: Address
+  market: Address
+  marketId: bigint
+}): Instruction {
+  if (args.marketId < 0n || args.marketId > 18_446_744_073_709_551_615n)
+    throw new Error("marketId out of range")
+
+  const data = new Uint8Array(1 + 8)
+  data[0] = 0
+  data.set(u64le(args.marketId), 1)
+
+  return {
+    programAddress: UMMO_MARKET_PROGRAM_ADDRESS,
+    accounts: [
+      { address: args.payer, role: AccountRole.WRITABLE_SIGNER },
+      { address: args.collateralMint, role: AccountRole.READONLY },
+      { address: args.oracleFeed, role: AccountRole.READONLY },
+      { address: args.matcherAuthority, role: AccountRole.READONLY },
+      { address: args.market, role: AccountRole.WRITABLE },
+      { address: SYSTEM_PROGRAM_ADDRESS, role: AccountRole.READONLY },
+      { address: CLOCK_SYSVAR_ADDRESS, role: AccountRole.READONLY },
+    ],
+    data,
+  }
 }
 
 export function getOpenTraderInstruction(args: {

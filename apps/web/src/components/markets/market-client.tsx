@@ -785,13 +785,16 @@ export function MarketClient(props: MarketClientProps) {
       const tradeAccounts = baseIx.accounts ?? []
       if (!tradeAccounts.length) throw new Error("Trade instruction missing accounts")
 
-      const ix = {
-        ...baseIx,
-        accounts: tradeAccounts.map((acc) => {
-          if (acc.address !== matcherAuthorityAddress) return acc
-          return { ...acc, signer: matcherSigner }
-        }),
-      }
+      const ix =
+        matcherAuthorityAddress === ownerAddress
+          ? baseIx
+          : {
+              ...baseIx,
+              accounts: tradeAccounts.map((acc) => {
+                if (acc.address !== matcherAuthorityAddress) return acc
+                return { ...acc, signer: matcherSigner }
+              }),
+            }
 
       ixs.push(ix)
 

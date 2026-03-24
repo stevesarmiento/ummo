@@ -11,9 +11,16 @@
     "dev": "turbo run dev --filter=web --filter=@ummo/backend",
     "build": "turbo run build",
     "lint": "turbo run lint",
-    "typecheck": "turbo run typecheck"
+    "typecheck": "turbo run typecheck",
+    "init-market": "bun run scripts/init-market.ts"
   },
   "devDependencies": {
     "turbo": "^2.8.20"
+  },
+  "dependencies": {
+    "@solana/kit": "5.5.1",
+    "@solana/signers": "5.5.1",
+    "@solana/transactions": "5.5.1",
+    "@ummo/sdk": "workspace:*"
   }
 }

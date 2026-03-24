@@ -10,7 +10,7 @@ use crate::{
 #[derive(Accounts)]
 pub struct InitShard<'info> {
     #[account(mut)]
-    pub payer: &'info mut Signer,
+    pub payer: &'info Signer,
 
     pub oracle_feed: &'info UncheckedAccount,
 
@@ -19,10 +19,10 @@ pub struct InitShard<'info> {
 
     pub shard_seed: &'info UncheckedAccount,
 
-    #[account(init, payer = payer, seeds = [SHARD_SEED, market, shard_seed], bump)]
+    #[account(mut, init, payer = payer, seeds = [SHARD_SEED, market, shard_seed], bump)]
     pub shard: &'info mut Account<MarketShard>,
 
-    #[account(init, payer = payer, seeds = [ENGINE_SEED, shard], bump)]
+    #[account(mut, init, payer = payer, seeds = [ENGINE_SEED, shard], bump)]
     pub engine: &'info mut Account<ShardEngine>,
 
     pub system_program: &'info Program<System>,
