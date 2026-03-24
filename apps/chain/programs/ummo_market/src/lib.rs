@@ -9,7 +9,7 @@ pub use constants::*;
 pub use instructions::*;
 pub use state::*;
 
-declare_id!("EMN8q6Lz1uhBqJusVygXxQvcFt3tmFCB4hnpk2Bbhymu");
+declare_id!("4AboEjY4zXBF5QmDQCPT4XnaaU3pEGnCDuVy5HzR9T8e");
 
 #[program]
 pub mod ummo_market {

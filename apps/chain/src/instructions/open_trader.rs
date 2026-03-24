@@ -10,7 +10,7 @@ use crate::{
 #[derive(Accounts)]
 pub struct OpenTrader<'info> {
     #[account(mut)]
-    pub signer: &'info Signer,
+    pub signer: &'info mut Signer,
 
     pub oracle_feed: &'info UncheckedAccount,
 
@@ -22,7 +22,7 @@ pub struct OpenTrader<'info> {
     #[account(mut, seeds = [ENGINE_SEED, shard], bump)]
     pub engine: &'info mut Account<ShardEngine>,
 
-    #[account(mut, init, payer = signer, seeds = [TRADER_SEED, shard, signer], bump)]
+    #[account(init, payer = signer, seeds = [TRADER_SEED, shard, signer], bump)]
     pub trader: &'info mut Account<Trader>,
 
     pub system_program: &'info Program<System>,

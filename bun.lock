@@ -4,12 +4,6 @@
   "workspaces": {
     "": {
       "name": "ummo",
-      "dependencies": {
-        "@solana/kit": "5.5.1",
-        "@solana/signers": "5.5.1",
-        "@solana/transactions": "5.5.1",
-        "@ummo/sdk": "workspace:*",
-      },
       "devDependencies": {
         "turbo": "^2.8.20",
       },

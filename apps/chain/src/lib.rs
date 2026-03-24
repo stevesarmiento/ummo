@@ -18,14 +18,7 @@ pub use oracle::*;
 pub use state::*;
 pub use token::*;
 
-declare_id!("EMN8q6Lz1uhBqJusVygXxQvcFt3tmFCB4hnpk2Bbhymu");
-
-#[no_mangle]
-pub static UMMO_BUILD_MARKER: [u8; 17] = *b"UMMO_BUILD_MARKER";
-
-#[cfg(feature = "debug")]
-#[used]
-static UMMO_DEBUG_FEATURE_MARKER: [u8; 26] = *b"UMMO_DEBUG_FEATURE_ENABLED";
+declare_id!("4AboEjY4zXBF5QmDQCPT4XnaaU3pEGnCDuVy5HzR9T8e");
 
 #[program]
 mod ummo_market {
@@ -35,8 +28,9 @@ mod ummo_market {
     pub fn init_market(
         ctx: Ctx<InitMarket>,
         market_id: u64,
+        shard_id: u16,
     ) -> Result<(), ProgramError> {
-        ctx.accounts.init_market(market_id, &ctx.bumps)
+        ctx.accounts.init_market(market_id, shard_id, &ctx.bumps)
     }
 
     #[instruction(discriminator = 1)]
@@ -91,11 +85,6 @@ mod ummo_market {
     #[instruction(discriminator = 8)]
     pub fn set_matcher_authority(ctx: Ctx<SetMatcherAuthority>) -> Result<(), ProgramError> {
         ctx.accounts.set_matcher_authority()
-    }
-
-    #[instruction(discriminator = 9)]
-    pub fn test_writable(ctx: Ctx<TestWritable>) -> Result<(), ProgramError> {
-        ctx.accounts.test_writable()
     }
 }
 
