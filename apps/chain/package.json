@@ -4,9 +4,9 @@
   "private": true,
   "license": "Apache-2.0",
   "scripts": {
-    "build": "quasar build",
-    "deploy": "quasar deploy",
-    "idl": "quasar idl .",
+    "build": "anchor build",
+    "deploy": "anchor deploy",
+    "idl": "anchor idl parse -f programs/ummo_market/src/lib.rs",
     "lint:fix": "prettier . --write",
     "lint": "prettier . --check"
   },

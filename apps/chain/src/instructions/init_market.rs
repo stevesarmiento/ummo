@@ -1,6 +1,7 @@
 use quasar_lang::prelude::*;
 
 use crate::{
+    account_init::init_pda_account,
     events::MarketInitialized,
     state::{MarketConfig, MARKET_SEED, SHARD_SEED},
 };
@@ -14,8 +15,8 @@ pub struct InitMarket<'info> {
     pub oracle_feed: &'info UncheckedAccount,
     pub matcher_authority: &'info UncheckedAccount,
 
-    #[account(mut, init, payer = payer, seeds = [MARKET_SEED, oracle_feed], bump)]
-    pub market: &'info mut Account<MarketConfig>,
+    #[account(mut, seeds = [MARKET_SEED, oracle_feed], bump)]
+    pub market: &'info UncheckedAccount,
 
     pub system_program: &'info Program<System>,
     pub clock: &'info Sysvar<Clock>,
@@ -30,14 +31,22 @@ impl<'info> InitMarket<'info> {
         let oracle_feed = *self.oracle_feed.address();
         let matcher_authority = *self.matcher_authority.address();
         let market = *self.market.address();
+        let market_bump = [bumps.market];
+        let market_seeds = [
+            Seed::from(MARKET_SEED),
+            Seed::from(oracle_feed.as_ref()),
+            Seed::from(&market_bump),
+        ];
+        let market_account =
+            init_pda_account::<MarketConfig>(self.system_program, self.payer, self.market, &market_seeds)?;
 
-        self.market.authority = authority;
-        self.market.bump = bumps.market;
-        self.market.market_id = PodU64::from(market_id);
-        self.market.collateral_mint = collateral_mint;
-        self.market.oracle_feed = oracle_feed;
-        self.market.matcher_authority = matcher_authority;
-        self.market.created_at_slot = self.clock.slot;
+        market_account.authority = authority;
+        market_account.bump = bumps.market;
+        market_account.market_id = PodU64::from(market_id);
+        market_account.collateral_mint = collateral_mint;
+        market_account.oracle_feed = oracle_feed;
+        market_account.matcher_authority = matcher_authority;
+        market_account.created_at_slot = self.clock.slot;
 
         let shard = {
             let seeds: [&[u8]; 3] = [SHARD_SEED, market.as_ref(), oracle_feed.as_ref()];

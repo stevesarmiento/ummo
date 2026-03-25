@@ -8,7 +8,7 @@ import {
 } from "@solana/kit"
 
 export const UMMO_MARKET_PROGRAM_ID = address(
-  "EMN8q6Lz1uhBqJusVygXxQvcFt3tmFCB4hnpk2Bbhymu",
+  "DiJFu657Rn1cncewnpsoWsqSxWKaQYpivVxGXSsC9vwB",
 )
 
 export const UMMO_MARKET_PROGRAM_ADDRESS = UMMO_MARKET_PROGRAM_ID
@@ -39,6 +39,34 @@ export const POSITION_SCALE_Q = 1_000_000n
 
 const addressEncoder = getAddressEncoder()
 
+const INIT_MARKET_DISCRIMINATOR = new Uint8Array([
+  33, 253, 15, 116, 89, 25, 127, 236,
+])
+const DEPOSIT_DISCRIMINATOR = new Uint8Array([
+  242, 35, 198, 137, 82, 225, 242, 182,
+])
+const WITHDRAW_DISCRIMINATOR = new Uint8Array([
+  183, 18, 70, 156, 148, 109, 161, 34,
+])
+const EXECUTE_TRADE_DISCRIMINATOR = new Uint8Array([
+  77, 16, 192, 135, 13, 0, 106, 97,
+])
+const KEEPER_CRANK_DISCRIMINATOR = new Uint8Array([
+  161, 54, 130, 134, 161, 11, 157, 31,
+])
+const LIQUIDATE_AT_ORACLE_DISCRIMINATOR = new Uint8Array([
+  114, 205, 202, 240, 68, 84, 137, 29,
+])
+const OPEN_TRADER_DISCRIMINATOR = new Uint8Array([
+  223, 155, 155, 23, 151, 167, 170, 229,
+])
+const INIT_SHARD_DISCRIMINATOR = new Uint8Array([
+  52, 43, 132, 208, 128, 105, 135, 39,
+])
+const SET_MATCHER_AUTHORITY_DISCRIMINATOR = new Uint8Array([
+  5, 94, 51, 114, 0, 5, 95, 40,
+])
+
 function u64le(value: bigint): Uint8Array {
   const out = new Uint8Array(8)
   let v = value
@@ -53,12 +81,32 @@ function u16le(value: number): Uint8Array {
   return new Uint8Array([value & 0xff, (value >> 8) & 0xff])
 }
 
+function u32le(value: number): Uint8Array {
+  return new Uint8Array([
+    value & 0xff,
+    (value >> 8) & 0xff,
+    (value >> 16) & 0xff,
+    (value >> 24) & 0xff,
+  ])
+}
+
 function i64le(value: bigint): Uint8Array {
   const out = new Uint8Array(8)
   let v = BigInt.asUintN(64, BigInt.asIntN(64, value))
   for (let i = 0; i < 8; i++) {
     out[i] = Number(v & 0xffn)
     v >>= 8n
+  }
+  return out
+}
+
+function concatBytes(...parts: Uint8Array[]): Uint8Array {
+  const len = parts.reduce((sum, part) => sum + part.length, 0)
+  const out = new Uint8Array(len)
+  let cursor = 0
+  for (const part of parts) {
+    out.set(part, cursor)
+    cursor += part.length
   }
   return out
 }
@@ -137,9 +185,7 @@ export function getInitMarketInstruction(args: {
   if (args.marketId < 0n || args.marketId > 18_446_744_073_709_551_615n)
     throw new Error("marketId out of range")
 
-  const data = new Uint8Array(1 + 8)
-  data[0] = 0
-  data.set(u64le(args.marketId), 1)
+  const data = concatBytes(INIT_MARKET_DISCRIMINATOR, u64le(args.marketId))
 
   return {
     programAddress: UMMO_MARKET_PROGRAM_ADDRESS,
@@ -150,7 +196,6 @@ export function getInitMarketInstruction(args: {
       { address: args.matcherAuthority, role: AccountRole.READONLY },
       { address: args.market, role: AccountRole.WRITABLE },
       { address: SYSTEM_PROGRAM_ADDRESS, role: AccountRole.READONLY },
-      { address: CLOCK_SYSVAR_ADDRESS, role: AccountRole.READONLY },
     ],
     data,
   }
@@ -174,9 +219,8 @@ export function getOpenTraderInstruction(args: {
       { address: args.engine, role: AccountRole.WRITABLE },
       { address: args.trader, role: AccountRole.WRITABLE },
       { address: SYSTEM_PROGRAM_ADDRESS, role: AccountRole.READONLY },
-      { address: CLOCK_SYSVAR_ADDRESS, role: AccountRole.READONLY },
     ],
-    data: new Uint8Array([6]),
+    data: OPEN_TRADER_DISCRIMINATOR,
   }
 }
 
@@ -191,9 +235,7 @@ export function getInitShardInstruction(args: {
 }): Instruction {
   if (args.shardId < 0 || args.shardId > 65_535) throw new Error("shardId out of range")
 
-  const data = new Uint8Array(1 + 2)
-  data[0] = 7
-  data.set(u16le(args.shardId), 1)
+  const data = concatBytes(INIT_SHARD_DISCRIMINATOR, u16le(args.shardId))
 
   return {
     programAddress: UMMO_MARKET_PROGRAM_ADDRESS,
@@ -205,7 +247,6 @@ export function getInitShardInstruction(args: {
       { address: args.shard, role: AccountRole.WRITABLE },
       { address: args.engine, role: AccountRole.WRITABLE },
       { address: SYSTEM_PROGRAM_ADDRESS, role: AccountRole.READONLY },
-      { address: CLOCK_SYSVAR_ADDRESS, role: AccountRole.READONLY },
     ],
     data,
   }
@@ -217,7 +258,7 @@ export function getSetMatcherAuthorityInstruction(args: {
   market: Address
   newMatcherAuthority: Address
 }): Instruction {
-  const data = new Uint8Array([8])
+  const data = SET_MATCHER_AUTHORITY_DISCRIMINATOR
 
   return {
     programAddress: UMMO_MARKET_PROGRAM_ADDRESS,
@@ -226,7 +267,6 @@ export function getSetMatcherAuthorityInstruction(args: {
       { address: args.oracleFeed, role: AccountRole.READONLY },
       { address: args.market, role: AccountRole.WRITABLE },
       { address: args.newMatcherAuthority, role: AccountRole.READONLY },
-      { address: CLOCK_SYSVAR_ADDRESS, role: AccountRole.READONLY },
     ],
     data,
   }
@@ -243,9 +283,7 @@ export function getDepositInstruction(args: {
   vaultCollateral: Address
   amount: bigint
 }): Instruction {
-  const data = new Uint8Array(1 + 8)
-  data[0] = 1
-  data.set(u64le(args.amount), 1)
+  const data = concatBytes(DEPOSIT_DISCRIMINATOR, u64le(args.amount))
 
   return {
     programAddress: UMMO_MARKET_PROGRAM_ADDRESS,
@@ -259,7 +297,6 @@ export function getDepositInstruction(args: {
       { address: args.userCollateral, role: AccountRole.WRITABLE },
       { address: args.vaultCollateral, role: AccountRole.WRITABLE },
       { address: TOKEN_PROGRAM_ADDRESS, role: AccountRole.READONLY },
-      { address: CLOCK_SYSVAR_ADDRESS, role: AccountRole.READONLY },
     ],
     data,
   }
@@ -276,9 +313,7 @@ export function getWithdrawInstruction(args: {
   vaultCollateral: Address
   amount: bigint
 }): Instruction {
-  const data = new Uint8Array(1 + 8)
-  data[0] = 2
-  data.set(u64le(args.amount), 1)
+  const data = concatBytes(WITHDRAW_DISCRIMINATOR, u64le(args.amount))
 
   return {
     programAddress: UMMO_MARKET_PROGRAM_ADDRESS,
@@ -292,7 +327,6 @@ export function getWithdrawInstruction(args: {
       { address: args.userCollateral, role: AccountRole.WRITABLE },
       { address: args.vaultCollateral, role: AccountRole.WRITABLE },
       { address: TOKEN_PROGRAM_ADDRESS, role: AccountRole.READONLY },
-      { address: CLOCK_SYSVAR_ADDRESS, role: AccountRole.READONLY },
     ],
     data,
   }
@@ -309,10 +343,11 @@ export function getExecuteTradeInstruction(args: {
   execPrice: bigint
   sizeQ: bigint
 }): Instruction {
-  const data = new Uint8Array(1 + 8 + 8)
-  data[0] = 3
-  data.set(u64le(args.execPrice), 1)
-  data.set(i64le(args.sizeQ), 1 + 8)
+  const data = concatBytes(
+    EXECUTE_TRADE_DISCRIMINATOR,
+    u64le(args.execPrice),
+    i64le(args.sizeQ),
+  )
 
   return {
     programAddress: UMMO_MARKET_PROGRAM_ADDRESS,
@@ -324,7 +359,6 @@ export function getExecuteTradeInstruction(args: {
       { address: args.shard, role: AccountRole.READONLY },
       { address: args.engine, role: AccountRole.WRITABLE },
       { address: args.trader, role: AccountRole.READONLY },
-      { address: CLOCK_SYSVAR_ADDRESS, role: AccountRole.READONLY },
     ],
     data,
   }
@@ -344,18 +378,21 @@ export function getKeeperCrankInstruction(args: {
   const n = args.orderedCandidates.length
   if (n > 512) throw new Error("orderedCandidates exceeds 512")
 
-  const data = new Uint8Array(1 + 8 + 8 + 2 + n * 2 + 2)
-  data[0] = 4
-  data.set(u64le(args.nowSlot), 1)
-  data.set(u64le(args.oraclePrice), 1 + 8)
-  data.set(u16le(n), 1 + 8 + 8)
-
-  let cursor = 1 + 8 + 8 + 2
+  const orderedCandidates = new Uint8Array(n * 2)
+  let cursor = 0
   for (const idx of args.orderedCandidates) {
-    data.set(u16le(idx), cursor)
+    orderedCandidates.set(u16le(idx), cursor)
     cursor += 2
   }
-  data.set(u16le(args.maxRevalidations), cursor)
+
+  const data = concatBytes(
+    KEEPER_CRANK_DISCRIMINATOR,
+    u64le(args.nowSlot),
+    u64le(args.oraclePrice),
+    u32le(n),
+    orderedCandidates,
+    u16le(args.maxRevalidations),
+  )
 
   return {
     programAddress: UMMO_MARKET_PROGRAM_ADDRESS,
@@ -365,7 +402,6 @@ export function getKeeperCrankInstruction(args: {
       { address: args.market, role: AccountRole.READONLY },
       { address: args.shard, role: AccountRole.WRITABLE },
       { address: args.engine, role: AccountRole.WRITABLE },
-      { address: CLOCK_SYSVAR_ADDRESS, role: AccountRole.READONLY },
     ],
     data,
   }
@@ -382,9 +418,10 @@ export function getLiquidateAtOracleInstruction(args: {
   if (args.liquidateeEngineIndex < 0 || args.liquidateeEngineIndex > 65_535)
     throw new Error("liquidateeEngineIndex out of range")
 
-  const data = new Uint8Array(1 + 2)
-  data[0] = 5
-  data.set(u16le(args.liquidateeEngineIndex), 1)
+  const data = concatBytes(
+    LIQUIDATE_AT_ORACLE_DISCRIMINATOR,
+    u16le(args.liquidateeEngineIndex),
+  )
 
   return {
     programAddress: UMMO_MARKET_PROGRAM_ADDRESS,
@@ -394,7 +431,6 @@ export function getLiquidateAtOracleInstruction(args: {
       { address: args.market, role: AccountRole.READONLY },
       { address: args.shard, role: AccountRole.READONLY },
       { address: args.engine, role: AccountRole.WRITABLE },
-      { address: CLOCK_SYSVAR_ADDRESS, role: AccountRole.READONLY },
     ],
     data,
   }

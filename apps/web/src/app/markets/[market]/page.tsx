@@ -23,21 +23,78 @@ interface ShardDoc {
 }
 
 export default async function MarketPage(props: {
-  params: { market: string }
-  searchParams?: { shard?: string }
+  params: Promise<{ market: string }>
+  searchParams?: Promise<{ shard?: string }>
 }) {
-  const market = decodeURIComponent(props.params.market)
+  const params = await props.params
+  const searchParams = props.searchParams ? await props.searchParams : undefined
+  const market = decodeURIComponent(params.market)
   const doc = await convexQuery<MarketDoc | null>("markets:getByMarket", { market })
   if (!doc) notFound()
 
   const shards = await convexQuery<ShardDoc[]>("shards:listByMarket", { market })
-  const requestedShard = props.searchParams?.shard
+  const requestedShard = searchParams?.shard
   const selectedShard =
     (requestedShard ? shards.find((s) => s.shard === requestedShard) : null) ??
     shards[0] ??
     null
 
-  if (!selectedShard) notFound()
+  if (!selectedShard) {
+    return (
+      <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-black">
+        <header className="sticky top-0 z-10 border-b border-black/5 bg-white/80 backdrop-blur dark:border-white/10 dark:bg-black/60">
+          <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-4 px-4 py-3">
+            <div className="flex items-center gap-3">
+              <Link href="/markets" className="text-sm font-semibold tracking-tight">
+                Markets
+              </Link>
+              <span className="text-xs text-zinc-500 dark:text-zinc-400">/</span>
+              <span className="font-mono text-xs text-zinc-700 dark:text-zinc-200">
+                {market}
+              </span>
+            </div>
+            <ConnectButton />
+          </div>
+        </header>
+
+        <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 px-4 py-8">
+          <h1 className="text-2xl font-semibold tracking-tight">Market</h1>
+          <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-black">
+            <div className="text-sm font-medium text-zinc-950 dark:text-zinc-50">
+              Market created, no shards yet
+            </div>
+            <div className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
+              This market has been indexed, but no shard has been initialized yet.
+              Shard initialization is being separated from market creation in the
+              new Anchor flow.
+            </div>
+            <div className="mt-4 grid grid-cols-1 gap-2 text-xs text-zinc-600 dark:text-zinc-300">
+              <div className="flex flex-col">
+                <span className="font-medium">Market</span>
+                <span className="font-mono">{doc.market}</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="font-medium">Authority</span>
+                <span className="font-mono">{doc.authority}</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="font-medium">Collateral mint</span>
+                <span className="font-mono">{doc.collateralMint}</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="font-medium">Oracle feed</span>
+                <span className="font-mono">{doc.oracleFeed}</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="font-medium">Matcher authority</span>
+                <span className="font-mono">{doc.matcherAuthority}</span>
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-black">

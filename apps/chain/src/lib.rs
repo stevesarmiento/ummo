@@ -2,6 +2,7 @@
 
 use quasar_lang::prelude::*;
 
+mod account_init;
 mod errors;
 mod engine;
 mod events;
@@ -10,6 +11,7 @@ mod oracle;
 mod state;
 mod token;
 
+pub use account_init::*;
 pub use errors::*;
 pub use engine::*;
 pub use events::*;

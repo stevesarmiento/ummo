@@ -2,7 +2,6 @@ import { readFile } from "node:fs/promises"
 import process from "node:process"
 
 import {
-  AccountRole,
   address,
   appendTransactionMessageInstructions,
   assertIsTransactionWithinSizeLimit,
@@ -15,27 +14,15 @@ import {
   setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash,
   signTransactionMessageWithSigners,
-  type Address,
   type Instruction,
 } from "@solana/kit"
 import { createKeyPairSignerFromBytes } from "@solana/signers"
 import { assertIsTransactionWithBlockhashLifetime } from "@solana/transactions"
 
-import {
-  ASSOCIATED_TOKEN_PROGRAM_ADDRESS,
-  SYSTEM_PROGRAM_ADDRESS,
-  TOKEN_PROGRAM_ADDRESS,
-  getAssociatedTokenAddress,
-  getEngineAddress,
-  getInitMarketInstruction,
-  getInitShardInstruction,
-  getMarketAddress,
-  getShardAddress,
-} from "@ummo/sdk"
+import { getInitMarketInstruction, getMarketAddress } from "@ummo/sdk"
 
 const DEFAULT_RPC_URL = "https://api.devnet.solana.com"
 const DEFAULT_PAYER_PATH = "~/.config/solana/id.json"
-const SYSVAR_RENT_ADDRESS = address("SysvarRent111111111111111111111111111111111")
 const PYTH_RECEIVER_PROGRAM_ID = address(
   "rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ",
 )
@@ -105,14 +92,6 @@ function getRequiredStringArg(
   return value
 }
 
-function parseU16(value: string, argName: string): number {
-  const n = Number(value)
-  if (!Number.isInteger(n) || n < 0 || n > 65_535) {
-    throw new Error(`${argName} must be an integer in [0, 65535]`)
-  }
-  return n
-}
-
 function parseU64(value: string, argName: string): bigint {
   if (!/^\d+$/.test(value)) throw new Error(`${argName} must be a base-10 unsigned integer`)
   const n = BigInt(value)
@@ -120,27 +99,6 @@ function parseU64(value: string, argName: string): bigint {
     throw new Error(`${argName} out of range`)
   }
   return n
-}
-
-function getCreateAssociatedTokenAccountInstruction(args: {
-  payer: Address
-  associatedToken: Address
-  owner: Address
-  mint: Address
-}): Instruction {
-  return {
-    programAddress: ASSOCIATED_TOKEN_PROGRAM_ADDRESS,
-    accounts: [
-      { address: args.payer, role: AccountRole.WRITABLE_SIGNER },
-      { address: args.associatedToken, role: AccountRole.WRITABLE },
-      { address: args.owner, role: AccountRole.READONLY },
-      { address: args.mint, role: AccountRole.READONLY },
-      { address: SYSTEM_PROGRAM_ADDRESS, role: AccountRole.READONLY },
-      { address: TOKEN_PROGRAM_ADDRESS, role: AccountRole.READONLY },
-      { address: SYSVAR_RENT_ADDRESS, role: AccountRole.READONLY },
-    ],
-    data: new Uint8Array(),
-  }
 }
 
 async function convexAction<T>(args: {
@@ -180,8 +138,6 @@ function printHelp(): void {
       `  --payer               Path to payer keypair JSON (default: ${DEFAULT_PAYER_PATH})`,
       "  --collateral-mint     USDC mint (default: devnet USDC)",
       "  --market-id           u64 market id (default: 0)",
-      "  --shard-id            u16 shard id (default: 0)",
-      "  --skip-vault-ata      Do not create the shard vault ATA in this tx",
       "",
       "Example:",
       "  bun run init-market \\",
@@ -191,8 +147,7 @@ function printHelp(): void {
       "    --oracle-feed \"<PriceUpdateV2_account_pubkey>\" \\",
       "    --collateral-mint \"4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU\" \\",
       "    --matcher-authority \"<matcher_pubkey>\" \\",
-      "    --market-id 0 \\",
-      "    --shard-id 0",
+      "    --market-id 0",
       "",
     ].join("\n"),
   )
@@ -231,9 +186,6 @@ async function main() {
   )
 
   const marketId = parseU64(getStringArg(args, "market-id") ?? "0", "market-id")
-  const shardId = parseU16(getStringArg(args, "shard-id") ?? "0", "shard-id")
-  const shouldCreateVaultAta = !args.has("skip-vault-ata")
-
   const payerBytesRaw = await readFile(payerPath, "utf-8")
   const payerParsed = JSON.parse(payerBytesRaw) as unknown
   if (!Array.isArray(payerParsed)) throw new Error("payer keypair must be a JSON array")
@@ -265,27 +217,7 @@ async function main() {
   }
 
   const market = await getMarketAddress({ oracleFeed: oracleFeedAddress })
-  const shard = await getShardAddress({ market, shardSeed: oracleFeedAddress })
-  const engine = await getEngineAddress({ shard })
-  const vaultCollateral = await getAssociatedTokenAddress({
-    owner: shard,
-    mint: collateralMintAddress,
-  })
-
-  const ixs: Instruction[] = []
-
-  if (shouldCreateVaultAta) {
-    ixs.push(
-      getCreateAssociatedTokenAccountInstruction({
-        payer: payerSigner.address,
-        associatedToken: vaultCollateral,
-        owner: shard,
-        mint: collateralMintAddress,
-      }),
-    )
-  }
-
-  ixs.push(
+  const ixs: Instruction[] = [
     getInitMarketInstruction({
       payer: payerSigner.address,
       collateralMint: collateralMintAddress,
@@ -294,19 +226,7 @@ async function main() {
       market,
       marketId,
     }),
-  )
-
-  ixs.push(
-    getInitShardInstruction({
-      payer: payerSigner.address,
-      oracleFeed: oracleFeedAddress,
-      market,
-      shardSeed: oracleFeedAddress,
-      shard,
-      engine,
-      shardId,
-    }),
-  )
+  ]
 
   const { value: latestBlockhash } = await rpc.getLatestBlockhash().send()
   const transactionMessage = pipe(
@@ -340,9 +260,6 @@ async function main() {
       "Initialized market + indexed into Convex.",
       `- signature: ${signature}`,
       `- market: ${market}`,
-      `- shard: ${shard}`,
-      `- engine: ${engine}`,
-      `- vaultCollateral(ATA): ${vaultCollateral}`,
       "",
       "Next:",
       "- Open `/markets` in the web app and refresh.",

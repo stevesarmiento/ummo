@@ -1,5 +1,6 @@
 "use node"
 
+import { createHash } from "node:crypto"
 import bs58 from "bs58"
 
 export interface MarketInitializedEvent {
@@ -120,6 +121,38 @@ export const WITHDRAWAL_BYTES_LEN = 1 + 32 * 4 + 8 + 2 + 2 + 4 + 8 + 8 + 8
 export const LIQUIDATION_DISCRIMINATOR = 6
 export const LIQUIDATION_BYTES_LEN = 1 + 32 * 4 + 2 + 1 + 1 + 4 + 8 + 8 + 8 + 8
 
+const ANCHOR_MARKET_INITIALIZED_DISCRIMINATOR = createHash("sha256")
+  .update("event:MarketInitialized")
+  .digest()
+  .subarray(0, 8)
+const ANCHOR_MARKET_INITIALIZED_BYTES_LEN = 8 + 32 * 6 + 8
+
+const ANCHOR_SHARD_INITIALIZED_DISCRIMINATOR = createHash("sha256")
+  .update("event:ShardInitialized")
+  .digest()
+  .subarray(0, 8)
+const ANCHOR_SHARD_INITIALIZED_BYTES_LEN = 8 + 32 * 4 + 2 + 2 + 8 + 8
+
+const ANCHOR_MATCHER_AUTHORITY_UPDATED_DISCRIMINATOR = createHash("sha256")
+  .update("event:MatcherAuthorityUpdated")
+  .digest()
+  .subarray(0, 8)
+const ANCHOR_MATCHER_AUTHORITY_UPDATED_BYTES_LEN = 8 + 32 * 4 + 8
+
+const ANCHOR_TRADER_OPENED_DISCRIMINATOR = createHash("sha256")
+  .update("event:TraderOpened")
+  .digest()
+  .subarray(0, 8)
+const ANCHOR_TRADER_OPENED_BYTES_LEN = 8 + 32 * 4 + 2
+
+function hasPrefix(bytes: Uint8Array, prefix: Uint8Array): boolean {
+  if (bytes.length < prefix.length) return false
+  for (let i = 0; i < prefix.length; i++) {
+    if (bytes[i] !== prefix[i]) return false
+  }
+  return true
+}
+
 export function readU64LE(bytes: Uint8Array): bigint {
   let value = 0n
   for (let i = 0; i < 8; i++) value |= BigInt(bytes[i] ?? 0) << (8n * BigInt(i))
@@ -160,16 +193,31 @@ export function extractProgramDataBase64(logLine: string): string[] {
 export function parseMarketInitializedEvent(
   bytes: Uint8Array,
 ): MarketInitializedEvent | null {
-  if (bytes.length !== MARKET_INITIALIZED_BYTES_LEN) return null
-  if (bytes[0] !== MARKET_INITIALIZED_DISCRIMINATOR) return null
+  if (bytes.length === MARKET_INITIALIZED_BYTES_LEN && bytes[0] === MARKET_INITIALIZED_DISCRIMINATOR) {
+    const market = bs58.encode(bytes.slice(1, 33))
+    const shard = bs58.encode(bytes.slice(33, 65))
+    const authority = bs58.encode(bytes.slice(65, 97))
+    const collateralMint = bs58.encode(bytes.slice(97, 129))
+    const oracleFeed = bs58.encode(bytes.slice(129, 161))
+    const matcherAuthority = bs58.encode(bytes.slice(161, 193))
+    const marketId = readU64LE(bytes.slice(193, 201))
 
-  const market = bs58.encode(bytes.slice(1, 33))
-  const shard = bs58.encode(bytes.slice(33, 65))
-  const authority = bs58.encode(bytes.slice(65, 97))
-  const collateralMint = bs58.encode(bytes.slice(97, 129))
-  const oracleFeed = bs58.encode(bytes.slice(129, 161))
-  const matcherAuthority = bs58.encode(bytes.slice(161, 193))
-  const marketId = readU64LE(bytes.slice(193, 201))
+    return { market, shard, authority, collateralMint, oracleFeed, matcherAuthority, marketId }
+  }
+
+  if (
+    bytes.length !== ANCHOR_MARKET_INITIALIZED_BYTES_LEN ||
+    !hasPrefix(bytes, ANCHOR_MARKET_INITIALIZED_DISCRIMINATOR)
+  )
+    return null
+
+  const market = bs58.encode(bytes.slice(8, 40))
+  const shard = bs58.encode(bytes.slice(40, 72))
+  const authority = bs58.encode(bytes.slice(72, 104))
+  const collateralMint = bs58.encode(bytes.slice(104, 136))
+  const oracleFeed = bs58.encode(bytes.slice(136, 168))
+  const matcherAuthority = bs58.encode(bytes.slice(168, 200))
+  const marketId = readU64LE(bytes.slice(200, 208))
 
   return { market, shard, authority, collateralMint, oracleFeed, matcherAuthority, marketId }
 }
@@ -177,17 +225,42 @@ export function parseMarketInitializedEvent(
 export function parseShardInitializedEvent(
   bytes: Uint8Array,
 ): ShardInitializedEvent | null {
-  if (bytes.length !== SHARD_INITIALIZED_BYTES_LEN) return null
-  if (bytes[0] !== SHARD_INITIALIZED_DISCRIMINATOR) return null
+  if (bytes.length === SHARD_INITIALIZED_BYTES_LEN && bytes[0] === SHARD_INITIALIZED_DISCRIMINATOR) {
+    const market = bs58.encode(bytes.slice(1, 33))
+    const shard = bs58.encode(bytes.slice(33, 65))
+    const authority = bs58.encode(bytes.slice(65, 97))
+    const shardSeed = bs58.encode(bytes.slice(97, 129))
+    const shardId = readU16LE(bytes.slice(129, 131))
+    const houseEngineIndex = readU16LE(bytes.slice(131, 133))
+    const createdAtSlot = readU64LE(bytes.slice(137, 145))
+    const lastCrankSlot = readU64LE(bytes.slice(145, 153))
 
-  const market = bs58.encode(bytes.slice(1, 33))
-  const shard = bs58.encode(bytes.slice(33, 65))
-  const authority = bs58.encode(bytes.slice(65, 97))
-  const shardSeed = bs58.encode(bytes.slice(97, 129))
-  const shardId = readU16LE(bytes.slice(129, 131))
-  const houseEngineIndex = readU16LE(bytes.slice(131, 133))
-  const createdAtSlot = readU64LE(bytes.slice(137, 145))
-  const lastCrankSlot = readU64LE(bytes.slice(145, 153))
+    return {
+      market,
+      shard,
+      authority,
+      shardSeed,
+      shardId,
+      houseEngineIndex,
+      createdAtSlot,
+      lastCrankSlot,
+    }
+  }
+
+  if (
+    bytes.length !== ANCHOR_SHARD_INITIALIZED_BYTES_LEN ||
+    !hasPrefix(bytes, ANCHOR_SHARD_INITIALIZED_DISCRIMINATOR)
+  )
+    return null
+
+  const market = bs58.encode(bytes.slice(8, 40))
+  const shard = bs58.encode(bytes.slice(40, 72))
+  const authority = bs58.encode(bytes.slice(72, 104))
+  const shardSeed = bs58.encode(bytes.slice(104, 136))
+  const shardId = readU16LE(bytes.slice(136, 138))
+  const houseEngineIndex = readU16LE(bytes.slice(138, 140))
+  const createdAtSlot = readU64LE(bytes.slice(140, 148))
+  const lastCrankSlot = readU64LE(bytes.slice(148, 156))
 
   return {
     market,
@@ -204,27 +277,56 @@ export function parseShardInitializedEvent(
 export function parseMatcherAuthorityUpdatedEvent(
   bytes: Uint8Array,
 ): MatcherAuthorityUpdatedEvent | null {
-  if (bytes.length !== MATCHER_AUTHORITY_UPDATED_BYTES_LEN) return null
-  if (bytes[0] !== MATCHER_AUTHORITY_UPDATED_DISCRIMINATOR) return null
+  if (
+    bytes.length === MATCHER_AUTHORITY_UPDATED_BYTES_LEN &&
+    bytes[0] === MATCHER_AUTHORITY_UPDATED_DISCRIMINATOR
+  ) {
+    const market = bs58.encode(bytes.slice(1, 33))
+    const authority = bs58.encode(bytes.slice(33, 65))
+    const oldMatcherAuthority = bs58.encode(bytes.slice(65, 97))
+    const newMatcherAuthority = bs58.encode(bytes.slice(97, 129))
+    const nowSlot = readU64LE(bytes.slice(129, 137))
 
-  const market = bs58.encode(bytes.slice(1, 33))
-  const authority = bs58.encode(bytes.slice(33, 65))
-  const oldMatcherAuthority = bs58.encode(bytes.slice(65, 97))
-  const newMatcherAuthority = bs58.encode(bytes.slice(97, 129))
-  const nowSlot = readU64LE(bytes.slice(129, 137))
+    return { market, authority, oldMatcherAuthority, newMatcherAuthority, nowSlot }
+  }
+
+  if (
+    bytes.length !== ANCHOR_MATCHER_AUTHORITY_UPDATED_BYTES_LEN ||
+    !hasPrefix(bytes, ANCHOR_MATCHER_AUTHORITY_UPDATED_DISCRIMINATOR)
+  )
+    return null
+
+  const market = bs58.encode(bytes.slice(8, 40))
+  const authority = bs58.encode(bytes.slice(40, 72))
+  const oldMatcherAuthority = bs58.encode(bytes.slice(72, 104))
+  const newMatcherAuthority = bs58.encode(bytes.slice(104, 136))
+  const nowSlot = readU64LE(bytes.slice(136, 144))
 
   return { market, authority, oldMatcherAuthority, newMatcherAuthority, nowSlot }
 }
 
 export function parseTraderOpenedEvent(bytes: Uint8Array): TraderOpenedEvent | null {
-  if (bytes.length !== TRADER_OPENED_BYTES_LEN) return null
-  if (bytes[0] !== TRADER_OPENED_DISCRIMINATOR) return null
+  if (bytes.length === TRADER_OPENED_BYTES_LEN && bytes[0] === TRADER_OPENED_DISCRIMINATOR) {
+    const market = bs58.encode(bytes.slice(1, 33))
+    const shard = bs58.encode(bytes.slice(33, 65))
+    const trader = bs58.encode(bytes.slice(65, 97))
+    const owner = bs58.encode(bytes.slice(97, 129))
+    const engineIndex = readU16LE(bytes.slice(129, 131))
 
-  const market = bs58.encode(bytes.slice(1, 33))
-  const shard = bs58.encode(bytes.slice(33, 65))
-  const trader = bs58.encode(bytes.slice(65, 97))
-  const owner = bs58.encode(bytes.slice(97, 129))
-  const engineIndex = readU16LE(bytes.slice(129, 131))
+    return { market, shard, trader, owner, engineIndex }
+  }
+
+  if (
+    bytes.length !== ANCHOR_TRADER_OPENED_BYTES_LEN ||
+    !hasPrefix(bytes, ANCHOR_TRADER_OPENED_DISCRIMINATOR)
+  )
+    return null
+
+  const market = bs58.encode(bytes.slice(8, 40))
+  const shard = bs58.encode(bytes.slice(40, 72))
+  const trader = bs58.encode(bytes.slice(72, 104))
+  const owner = bs58.encode(bytes.slice(104, 136))
+  const engineIndex = readU16LE(bytes.slice(136, 138))
 
   return { market, shard, trader, owner, engineIndex }
 }

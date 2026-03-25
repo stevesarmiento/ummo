@@ -1,22 +1,27 @@
 pub mod constants;
 pub mod error;
+pub mod events;
+pub mod engine;
 pub mod instructions;
 pub mod state;
 
 use anchor_lang::prelude::*;
 
 pub use constants::*;
+pub use error::*;
+pub use events::*;
+pub use engine::*;
 pub use instructions::*;
 pub use state::*;
 
-declare_id!("EMN8q6Lz1uhBqJusVygXxQvcFt3tmFCB4hnpk2Bbhymu");
+declare_id!("DiJFu657Rn1cncewnpsoWsqSxWKaQYpivVxGXSsC9vwB");
 
 #[program]
 pub mod ummo_market {
     use super::*;
 
-    pub fn init_market(ctx: Context<InitMarket>, initial_oracle_price: u64) -> Result<()> {
-        crate::instructions::init_market::handler(ctx, initial_oracle_price)
+    pub fn init_market(ctx: Context<InitMarket>, market_id: u64) -> Result<()> {
+        crate::instructions::init_market::handler(ctx, market_id)
     }
 
     pub fn deposit(ctx: Context<Deposit>, amount: u64) -> Result<()> {
@@ -27,8 +32,8 @@ pub mod ummo_market {
         crate::instructions::withdraw::handler(ctx, amount)
     }
 
-    pub fn execute_trade(ctx: Context<ExecuteTrade>, oracle_price: u64, exec_price: u64, size_q: i128) -> Result<()> {
-        crate::instructions::execute_trade::handler(ctx, oracle_price, exec_price, size_q)
+    pub fn execute_trade(ctx: Context<ExecuteTrade>, exec_price: u64, size_q: i64) -> Result<()> {
+        crate::instructions::execute_trade::handler(ctx, exec_price, size_q)
     }
 
     pub fn keeper_crank(
@@ -50,9 +55,19 @@ pub mod ummo_market {
     pub fn liquidate_at_oracle(
         ctx: Context<LiquidateAtOracle>,
         liquidatee_engine_idx: u16,
-        oracle_price: u64,
-        now_slot: u64,
     ) -> Result<()> {
-        crate::instructions::liquidate_at_oracle::handler(ctx, liquidatee_engine_idx, oracle_price, now_slot)
+        crate::instructions::liquidate_at_oracle::handler(ctx, liquidatee_engine_idx)
+    }
+
+    pub fn open_trader(ctx: Context<OpenTrader>) -> Result<()> {
+        crate::instructions::open_trader::handler(ctx)
+    }
+
+    pub fn init_shard(ctx: Context<InitShard>, shard_id: u16) -> Result<()> {
+        crate::instructions::init_shard::handler(ctx, shard_id)
+    }
+
+    pub fn set_matcher_authority(ctx: Context<SetMatcherAuthority>) -> Result<()> {
+        crate::instructions::set_matcher_authority::handler(ctx)
     }
 }

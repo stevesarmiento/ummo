@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test"
 import { AccountRole, address } from "@solana/kit"
 
 import {
-  CLOCK_SYSVAR_ADDRESS,
   getInitMarketInstruction,
   getSetMatcherAuthorityInstruction,
   getShardAddress,
@@ -29,15 +28,16 @@ describe("sdk instruction builders", () => {
     })
 
     expect(ix.programAddress).toBe(UMMO_MARKET_PROGRAM_ADDRESS)
-    expect(Array.from(ix.data ?? new Uint8Array())).toEqual([0, 42, 0, 0, 0, 0, 0, 0, 0])
-    expect(ix.accounts?.length).toBe(7)
+    expect(Array.from(ix.data ?? new Uint8Array())).toEqual([
+      33, 253, 15, 116, 89, 25, 127, 236, 42, 0, 0, 0, 0, 0, 0, 0,
+    ])
+    expect(ix.accounts?.length).toBe(6)
     expect(ix.accounts?.[0]).toEqual({ address: payer, role: AccountRole.WRITABLE_SIGNER })
     expect(ix.accounts?.[1]).toEqual({ address: collateralMint, role: AccountRole.READONLY })
     expect(ix.accounts?.[2]).toEqual({ address: oracleFeed, role: AccountRole.READONLY })
     expect(ix.accounts?.[3]).toEqual({ address: matcherAuthority, role: AccountRole.READONLY })
     expect(ix.accounts?.[4]).toEqual({ address: market, role: AccountRole.WRITABLE })
     expect(ix.accounts?.[5]).toEqual({ address: SYSTEM_PROGRAM_ADDRESS, role: AccountRole.READONLY })
-    expect(ix.accounts?.[6]).toEqual({ address: CLOCK_SYSVAR_ADDRESS, role: AccountRole.READONLY })
   })
 
   test("getSetMatcherAuthorityInstruction builds expected accounts/data", () => {
@@ -54,8 +54,10 @@ describe("sdk instruction builders", () => {
     })
 
     expect(ix.programAddress).toBe(UMMO_MARKET_PROGRAM_ADDRESS)
-    expect(Array.from(ix.data ?? new Uint8Array())).toEqual([8])
-    expect(ix.accounts?.length).toBe(5)
+    expect(Array.from(ix.data ?? new Uint8Array())).toEqual([
+      5, 94, 51, 114, 0, 5, 95, 40,
+    ])
+    expect(ix.accounts?.length).toBe(4)
     expect(ix.accounts?.[0]).toEqual({
       address: authority,
       role: AccountRole.READONLY_SIGNER,
@@ -66,7 +68,6 @@ describe("sdk instruction builders", () => {
       address: newMatcherAuthority,
       role: AccountRole.READONLY,
     })
-    expect(ix.accounts?.[4]).toEqual({ address: CLOCK_SYSVAR_ADDRESS, role: AccountRole.READONLY })
   })
 
   test("getShardAddress varies by shardSeed", async () => {

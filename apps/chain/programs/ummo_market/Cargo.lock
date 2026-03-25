@@ -1464,7 +1464,6 @@ name = "ummo_market"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
- "bytemuck",
  "percolator",
 ]
 

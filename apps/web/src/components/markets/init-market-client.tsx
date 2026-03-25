@@ -1,7 +1,6 @@
 "use client"
 
 import {
-  AccountRole,
   address,
   appendTransactionMessageInstructions,
   assertIsTransactionWithinSizeLimit,
@@ -14,28 +13,16 @@ import {
   setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash,
   signTransactionMessageWithSigners,
-  type Address,
   type Instruction,
 } from "@solana/kit"
 import { assertIsTransactionWithBlockhashLifetime } from "@solana/transactions"
 import { useConnectorClient, useKitTransactionSigner } from "@solana/connector"
 import { useCallback, useMemo, useState } from "react"
 
-import {
-  ASSOCIATED_TOKEN_PROGRAM_ADDRESS,
-  SYSTEM_PROGRAM_ADDRESS,
-  TOKEN_PROGRAM_ADDRESS,
-  getAssociatedTokenAddress,
-  getEngineAddress,
-  getInitMarketInstruction,
-  getInitShardInstruction,
-  getMarketAddress,
-  getShardAddress,
-} from "@ummo/sdk"
+import { getInitMarketInstruction, getMarketAddress } from "@ummo/sdk"
 
 import { convexAction } from "@/lib/convex-http"
 
-const SYSVAR_RENT_ADDRESS = address("SysvarRent111111111111111111111111111111111")
 const PYTH_RECEIVER_PROGRAM_ID = address(
   "rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ",
 )
@@ -49,38 +36,11 @@ function wsUrlFromHttpUrl(httpUrl: string): string {
   return httpUrl
 }
 
-function parseU16(value: string): number | null {
-  const n = Number(value)
-  if (!Number.isInteger(n) || n < 0 || n > 65_535) return null
-  return n
-}
-
 function parseU64(value: string): bigint | null {
   if (!/^\d+$/.test(value)) return null
   const n = BigInt(value)
   if (n < 0n || n > 18_446_744_073_709_551_615n) return null
   return n
-}
-
-function getCreateAssociatedTokenAccountInstruction(args: {
-  payer: Address
-  associatedToken: Address
-  owner: Address
-  mint: Address
-}): Instruction {
-  return {
-    programAddress: ASSOCIATED_TOKEN_PROGRAM_ADDRESS,
-    accounts: [
-      { address: args.payer, role: AccountRole.WRITABLE_SIGNER },
-      { address: args.associatedToken, role: AccountRole.WRITABLE },
-      { address: args.owner, role: AccountRole.READONLY },
-      { address: args.mint, role: AccountRole.READONLY },
-      { address: SYSTEM_PROGRAM_ADDRESS, role: AccountRole.READONLY },
-      { address: TOKEN_PROGRAM_ADDRESS, role: AccountRole.READONLY },
-      { address: SYSVAR_RENT_ADDRESS, role: AccountRole.READONLY },
-    ],
-    data: new Uint8Array(),
-  }
 }
 
 export function InitMarketClient() {
@@ -91,9 +51,6 @@ export function InitMarketClient() {
   const [collateralMintInput, setCollateralMintInput] = useState(DEFAULT_DEVNET_USDC_MINT)
   const [matcherAuthorityInput, setMatcherAuthorityInput] = useState<string>("")
   const [marketIdInput, setMarketIdInput] = useState("0")
-  const [shardIdInput, setShardIdInput] = useState("0")
-  const [shouldCreateVaultAta, setShouldCreateVaultAta] = useState(true)
-
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [signature, setSignature] = useState<string | null>(null)
@@ -127,8 +84,6 @@ export function InitMarketClient() {
   }, [matcherAuthorityInput, ownerAddress])
 
   const marketId = useMemo(() => parseU64(marketIdInput.trim()), [marketIdInput])
-  const shardId = useMemo(() => parseU16(shardIdInput.trim()), [shardIdInput])
-
   const sendAndIndex = useCallback(
     async (ixs: readonly Instruction[]) => {
       if (!signer || !client) throw new Error("Wallet not connected")
@@ -194,11 +149,6 @@ export function InitMarketClient() {
       setErrorMessage("Enter a valid market id (u64).")
       return
     }
-    if (shardId === null) {
-      setErrorMessage("Enter a valid shard id (u16).")
-      return
-    }
-
     if (!client) {
       setErrorMessage("Wallet client unavailable.")
       return
@@ -219,26 +169,7 @@ export function InitMarketClient() {
       }
 
       const market = await getMarketAddress({ oracleFeed: oracleFeedAddress })
-      const shard = await getShardAddress({ market, shardSeed: oracleFeedAddress })
-      const engine = await getEngineAddress({ shard })
-      const vaultCollateral = await getAssociatedTokenAddress({
-        owner: shard,
-        mint: collateralMintAddress,
-      })
-
-      const ixs: Instruction[] = []
-      if (shouldCreateVaultAta) {
-        ixs.push(
-          getCreateAssociatedTokenAccountInstruction({
-            payer: ownerAddress,
-            associatedToken: vaultCollateral,
-            owner: shard,
-            mint: collateralMintAddress,
-          }),
-        )
-      }
-
-      ixs.push(
+      const ixs: Instruction[] = [
         getInitMarketInstruction({
           payer: ownerAddress,
           collateralMint: collateralMintAddress,
@@ -247,19 +178,7 @@ export function InitMarketClient() {
           market,
           marketId,
         }),
-      )
-
-      ixs.push(
-        getInitShardInstruction({
-          payer: ownerAddress,
-          oracleFeed: oracleFeedAddress,
-          market,
-          shardSeed: oracleFeedAddress,
-          shard,
-          engine,
-          shardId,
-        }),
-      )
+      ]
 
       await sendAndIndex(ixs)
     } catch (error) {
@@ -275,8 +194,6 @@ export function InitMarketClient() {
     oracleFeedAddress,
     ownerAddress,
     sendAndIndex,
-    shardId,
-    shouldCreateVaultAta,
   ])
 
   return (
@@ -286,7 +203,8 @@ export function InitMarketClient() {
           Initialize market (from connected wallet)
         </div>
         <div className="text-xs text-zinc-600 dark:text-zinc-300">
-          This sends `init_market` and indexes the signature into Convex.
+          This sends `init_market` and indexes the signature into Convex so it
+          appears on `/markets`.
         </div>
       </div>
 
@@ -333,39 +251,16 @@ export function InitMarketClient() {
           />
         </label>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <label className="flex flex-col gap-1">
-            <span className="text-xs font-medium text-zinc-700 dark:text-zinc-200">
-              Market id (u64)
-            </span>
-            <input
-              value={marketIdInput}
-              onChange={(e) => setMarketIdInput(e.target.value)}
-              placeholder="0"
-              className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-xs font-mono text-zinc-900 outline-none ring-0 placeholder:text-zinc-400 focus:border-black/20 dark:border-white/10 dark:bg-black dark:text-zinc-100 dark:placeholder:text-zinc-600"
-            />
-          </label>
-
-          <label className="flex flex-col gap-1">
-            <span className="text-xs font-medium text-zinc-700 dark:text-zinc-200">
-              Shard id (u16)
-            </span>
-            <input
-              value={shardIdInput}
-              onChange={(e) => setShardIdInput(e.target.value)}
-              placeholder="0"
-              className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-xs font-mono text-zinc-900 outline-none ring-0 placeholder:text-zinc-400 focus:border-black/20 dark:border-white/10 dark:bg-black dark:text-zinc-100 dark:placeholder:text-zinc-600"
-            />
-          </label>
-        </div>
-
-        <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-200">
+        <label className="flex flex-col gap-1">
+          <span className="text-xs font-medium text-zinc-700 dark:text-zinc-200">
+            Market id (u64)
+          </span>
           <input
-            type="checkbox"
-            checked={shouldCreateVaultAta}
-            onChange={(e) => setShouldCreateVaultAta(e.target.checked)}
+            value={marketIdInput}
+            onChange={(e) => setMarketIdInput(e.target.value)}
+            placeholder="0"
+            className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-xs font-mono text-zinc-900 outline-none ring-0 placeholder:text-zinc-400 focus:border-black/20 dark:border-white/10 dark:bg-black dark:text-zinc-100 dark:placeholder:text-zinc-600"
           />
-          Create shard vault ATA (recommended)
         </label>
 
         <button

@@ -1,25 +1,6 @@
-[package]
-name = "ummo_market"
-version = "0.1.0"
-edition = "2021"
-license = "Apache-2.0"
-publish = false
-
-[lib]
-crate-type = ["cdylib", "lib"]
-name = "ummo_market"
-
-[features]
-default = []
-alloc = ["quasar-lang/alloc"]
-debug = ["quasar-lang/debug"]
-
-[dependencies]
-quasar-lang = "0.0.0"
-percolator = { path = "../../crates/percolator-kernel", features = ["host"] }
-
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }
+[workspace]
+members = ["programs/*"]
+resolver = "2"
 
 [profile.release]
 overflow-checks = true
