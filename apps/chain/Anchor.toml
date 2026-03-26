@@ -6,10 +6,10 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-ummo_market = "DiJFu657Rn1cncewnpsoWsqSxWKaQYpivVxGXSsC9vwB"
+ummo_market = "Fk7Xs4araPKy6ijUSnaXBnmSV4k5FvUVRM3ukNJs9Bky"
 
 [programs.devnet]
-ummo_market = "DiJFu657Rn1cncewnpsoWsqSxWKaQYpivVxGXSsC9vwB"
+ummo_market = "Fk7Xs4araPKy6ijUSnaXBnmSV4k5FvUVRM3ukNJs9Bky"
 
 [registry]
 url = "https://api.apr.dev"

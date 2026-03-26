@@ -40,6 +40,11 @@ import {
 
 import { convexAction, convexQuery } from "@/lib/convex-http"
 
+import {
+  getCreateAssociatedTokenAccountInstruction,
+  getMintTokenProgramAddress,
+} from "./market-client-utils"
+
 interface TraderDoc {
   _id: string
   market: string
@@ -504,7 +509,6 @@ export function MarketClient(props: MarketClientProps) {
     setIsSubmitting(true)
     try {
       const engine = await getEngineAddress({ shard: shardAddress })
-      const lpPool = await getLpPoolAddress({ shard: shardAddress })
       const trader = await getTraderAddress({ shard: shardAddress, owner: ownerAddress })
 
       const ix = getOpenTraderInstruction({
@@ -536,7 +540,7 @@ export function MarketClient(props: MarketClientProps) {
   const handleDeposit = useCallback(async () => {
     setErrorMessage(null)
     setSignature(null)
-    if (!ownerAddress || !signer) return
+    if (!ownerAddress || !signer || !client) return
 
     const amount = parseFixedDecimal(depositInput, 6)
     if (!amount) {
@@ -546,32 +550,70 @@ export function MarketClient(props: MarketClientProps) {
 
     setIsSubmitting(true)
     try {
+      const rpcUrl = client.getRpcUrl()
+      if (!rpcUrl) throw new Error("No RPC endpoint configured")
+      const rpc = createSolanaRpc(rpcUrl)
       const engine = await getEngineAddress({ shard: shardAddress })
-      const lpPool = await getLpPoolAddress({ shard: shardAddress })
       const trader = await getTraderAddress({ shard: shardAddress, owner: ownerAddress })
+      const tokenProgram = await getMintTokenProgramAddress({
+        rpc,
+        mint: collateralMintAddress,
+      })
 
       const userCollateral = await getAssociatedTokenAddress({
         owner: ownerAddress,
         mint: collateralMintAddress,
+        tokenProgram,
       })
       const vaultCollateral = await getAssociatedTokenAddress({
         owner: shardAddress,
         mint: collateralMintAddress,
+        tokenProgram,
       })
 
-      const ix = getDepositInstruction({
-        owner: ownerAddress,
-        oracleFeed: oracleFeedAddress,
-        market: marketAddress,
-        shard: shardAddress,
-        engine,
-        trader,
-        userCollateral,
-        vaultCollateral,
-        amount,
-      })
+      const ixs: Instruction[] = []
+      const userAccount = await rpc.getAccountInfo(userCollateral, { encoding: "base64" }).send()
+      if (!userAccount.value) {
+        ixs.push(
+          getCreateAssociatedTokenAccountInstruction({
+            payer: ownerAddress,
+            associatedToken: userCollateral,
+            owner: ownerAddress,
+            mint: collateralMintAddress,
+            tokenProgram,
+          }),
+        )
+      }
+      const vaultAccount = await rpc.getAccountInfo(vaultCollateral, { encoding: "base64" }).send()
+      if (!vaultAccount.value) {
+        ixs.push(
+          getCreateAssociatedTokenAccountInstruction({
+            payer: ownerAddress,
+            associatedToken: vaultCollateral,
+            owner: shardAddress,
+            mint: collateralMintAddress,
+            tokenProgram,
+          }),
+        )
+      }
 
-      await sendAndIndex([ix])
+      ixs.push(
+        getDepositInstruction({
+          owner: ownerAddress,
+          oracleFeed: oracleFeedAddress,
+          market: marketAddress,
+          shard: shardAddress,
+          engine,
+          trader,
+          collateralMint: collateralMintAddress,
+          userCollateral,
+          vaultCollateral,
+          tokenProgram,
+          amount,
+        }),
+      )
+
+      await sendAndIndex(ixs)
       await Promise.all([refresh(), refreshActivity()])
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Deposit failed")
@@ -589,12 +631,13 @@ export function MarketClient(props: MarketClientProps) {
     sendAndIndex,
     shardAddress,
     signer,
+    client,
   ])
 
   const handleWithdraw = useCallback(async () => {
     setErrorMessage(null)
     setSignature(null)
-    if (!ownerAddress || !signer) return
+    if (!ownerAddress || !signer || !client) return
 
     if (!hasTrader) {
       setErrorMessage("Open your account first.")
@@ -609,19 +652,52 @@ export function MarketClient(props: MarketClientProps) {
 
     setIsSubmitting(true)
     try {
+      const rpcUrl = client.getRpcUrl()
+      if (!rpcUrl) throw new Error("No RPC endpoint configured")
+      const rpc = createSolanaRpc(rpcUrl)
       const engine = await getEngineAddress({ shard: shardAddress })
       const trader = await getTraderAddress({ shard: shardAddress, owner: ownerAddress })
+      const tokenProgram = await getMintTokenProgramAddress({
+        rpc,
+        mint: collateralMintAddress,
+      })
 
       const userCollateral = await getAssociatedTokenAddress({
         owner: ownerAddress,
         mint: collateralMintAddress,
+        tokenProgram,
       })
       const vaultCollateral = await getAssociatedTokenAddress({
         owner: shardAddress,
         mint: collateralMintAddress,
+        tokenProgram,
       })
 
       const ixs: Instruction[] = []
+      const userAccount = await rpc.getAccountInfo(userCollateral, { encoding: "base64" }).send()
+      if (!userAccount.value) {
+        ixs.push(
+          getCreateAssociatedTokenAccountInstruction({
+            payer: ownerAddress,
+            associatedToken: userCollateral,
+            owner: ownerAddress,
+            mint: collateralMintAddress,
+            tokenProgram,
+          }),
+        )
+      }
+      const vaultAccount = await rpc.getAccountInfo(vaultCollateral, { encoding: "base64" }).send()
+      if (!vaultAccount.value) {
+        ixs.push(
+          getCreateAssociatedTokenAccountInstruction({
+            payer: ownerAddress,
+            associatedToken: vaultCollateral,
+            owner: shardAddress,
+            mint: collateralMintAddress,
+            tokenProgram,
+          }),
+        )
+      }
       if (isCrankStale === true) {
         const quote = await convexAction<{ oraclePrice: string }>("matcher:getQuote", {
           oracleFeed: oracleFeedAddress,
@@ -651,8 +727,10 @@ export function MarketClient(props: MarketClientProps) {
           shard: shardAddress,
           engine,
           trader,
+          collateralMint: collateralMintAddress,
           userCollateral,
           vaultCollateral,
+          tokenProgram,
           amount,
         }),
       )
@@ -679,6 +757,7 @@ export function MarketClient(props: MarketClientProps) {
     shardAddress,
     signer,
     withdrawInput,
+    client,
   ])
 
   const handleQuote = useCallback(async () => {

@@ -23,7 +23,6 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 
 import {
   ASSOCIATED_TOKEN_PROGRAM_ADDRESS,
-  TOKEN_PROGRAM_ADDRESS,
   UMMO_MARKET_PROGRAM_ADDRESS,
   getAssociatedTokenAddress,
   getDepositInstruction,
@@ -48,6 +47,7 @@ import {
   getCapabilityGroups,
   getTraderActionAvailability,
 } from "./market-capabilities"
+import { getMintTokenProgramAddress } from "./market-client-utils"
 
 export interface MarketAdminClientProps {
   market: string
@@ -151,6 +151,7 @@ function getCreateAssociatedTokenAccountInstruction(args: {
   associatedToken: Address
   owner: Address
   mint: Address
+  tokenProgram: Address
 }): Instruction {
   return {
     programAddress: ASSOCIATED_TOKEN_PROGRAM_ADDRESS,
@@ -160,7 +161,7 @@ function getCreateAssociatedTokenAccountInstruction(args: {
       { address: args.owner, role: AccountRole.READONLY },
       { address: args.mint, role: AccountRole.READONLY },
       { address: address("11111111111111111111111111111111"), role: AccountRole.READONLY },
-      { address: TOKEN_PROGRAM_ADDRESS, role: AccountRole.READONLY },
+      { address: args.tokenProgram, role: AccountRole.READONLY },
       { address: SYSVAR_RENT_ADDRESS, role: AccountRole.READONLY },
     ],
     data: new Uint8Array(),
@@ -545,14 +546,20 @@ export function MarketAdminClient(props: MarketAdminClientProps) {
       const rpcUrl = client?.getRpcUrl()
       if (!rpcUrl) throw new Error("No RPC endpoint configured")
       const rpc = createSolanaRpc(rpcUrl)
+      const tokenProgram = await getMintTokenProgramAddress({
+        rpc,
+        mint: collateralMintAddress,
+      })
 
       const userCollateral = await getAssociatedTokenAddress({
         owner: ownerAddress,
         mint: collateralMintAddress,
+        tokenProgram,
       })
       const vaultCollateral = await getAssociatedTokenAddress({
         owner: shardAddress,
         mint: collateralMintAddress,
+        tokenProgram,
       })
 
       const ixs: Instruction[] = []
@@ -564,6 +571,7 @@ export function MarketAdminClient(props: MarketAdminClientProps) {
             associatedToken: vaultCollateral,
             owner: shardAddress,
             mint: collateralMintAddress,
+            tokenProgram,
           }),
         )
       }
@@ -577,8 +585,10 @@ export function MarketAdminClient(props: MarketAdminClientProps) {
           lpPool: address(derived.lpPool),
           engine: address(derived.engine),
           lpPosition: address(derived.lpPosition),
+          collateralMint: collateralMintAddress,
           userCollateral,
           vaultCollateral,
+          tokenProgram,
           amount,
         }),
       )
@@ -760,13 +770,19 @@ export function MarketAdminClient(props: MarketAdminClientProps) {
       const rpcUrl = client?.getRpcUrl()
       if (!rpcUrl) throw new Error("No RPC endpoint configured")
       const rpc = createSolanaRpc(rpcUrl)
+      const tokenProgram = await getMintTokenProgramAddress({
+        rpc,
+        mint: collateralMintAddress,
+      })
       const userCollateral = await getAssociatedTokenAddress({
         owner: ownerAddress,
         mint: collateralMintAddress,
+        tokenProgram,
       })
       const vaultCollateral = await getAssociatedTokenAddress({
         owner: shardAddress,
         mint: collateralMintAddress,
+        tokenProgram,
       })
       const ixs: Instruction[] = []
       const vaultAccount = await rpc.getAccountInfo(vaultCollateral, { encoding: "base64" }).send()
@@ -777,6 +793,7 @@ export function MarketAdminClient(props: MarketAdminClientProps) {
             associatedToken: vaultCollateral,
             owner: shardAddress,
             mint: collateralMintAddress,
+            tokenProgram,
           }),
         )
       }
@@ -788,8 +805,10 @@ export function MarketAdminClient(props: MarketAdminClientProps) {
           shard: shardAddress,
           engine: address(derived.engine),
           trader: address(derived.trader),
+          collateralMint: collateralMintAddress,
           userCollateral,
           vaultCollateral,
+          tokenProgram,
           amount,
         }),
       )

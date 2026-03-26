@@ -19,6 +19,7 @@ pub struct LiquidateAtOracle<'info> {
     #[account(seeds = [SHARD_SEED, market.key().as_ref(), shard.shard_seed.as_ref()], bump = shard.bump)]
     pub shard: Account<'info, MarketShard>,
 
+    /// CHECK: engine account is validated by PDA seeds for future liquidation logic.
     #[account(mut, seeds = [ENGINE_SEED, shard.key().as_ref()], bump)]
     pub engine: UncheckedAccount<'info>,
 }

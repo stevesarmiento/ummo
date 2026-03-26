@@ -45,6 +45,10 @@ export const upsertFromOpenedEvent = mutationGeneric({
 
     const patch = {
       ...args,
+      lockedShares: existing?.lockedShares ?? 0n,
+      pendingWithdrawShares: existing?.pendingWithdrawShares ?? 0n,
+      pendingWithdrawAmount: existing?.pendingWithdrawAmount ?? 0n,
+      pendingWithdrawClaimableAtSlot: existing?.pendingWithdrawClaimableAtSlot,
       indexedAt: Date.now(),
     }
 
@@ -54,5 +58,61 @@ export const upsertFromOpenedEvent = mutationGeneric({
     }
 
     return await ctx.db.insert("lpPositions", patch)
+  },
+})
+
+export const applyWithdrawalRequestedEvent = mutationGeneric({
+  args: {
+    lpPosition: v.string(),
+    requestedShares: v.int64(),
+    estimatedAmount: v.int64(),
+    claimableAtSlot: v.int64(),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("lpPositions")
+      .withIndex("by_lp_position", (q) => q.eq("lpPosition", args.lpPosition))
+      .unique()
+    if (!existing) return null
+
+    const lockedShares = existing.lockedShares ?? 0n
+
+    await ctx.db.patch(existing._id, {
+      lockedShares: lockedShares + args.requestedShares,
+      pendingWithdrawShares: args.requestedShares,
+      pendingWithdrawAmount: args.estimatedAmount,
+      pendingWithdrawClaimableAtSlot: args.claimableAtSlot,
+      indexedAt: Date.now(),
+    })
+
+    return existing._id
+  },
+})
+
+export const applyWithdrawalClaimedEvent = mutationGeneric({
+  args: {
+    lpPosition: v.string(),
+    burnedShares: v.int64(),
+    claimedAmount: v.int64(),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("lpPositions")
+      .withIndex("by_lp_position", (q) => q.eq("lpPosition", args.lpPosition))
+      .unique()
+    if (!existing) return null
+
+    const lockedShares = existing.lockedShares ?? 0n
+
+    await ctx.db.patch(existing._id, {
+      shares: existing.shares - args.burnedShares,
+      lockedShares: lockedShares - args.burnedShares,
+      pendingWithdrawShares: 0n,
+      pendingWithdrawAmount: 0n,
+      pendingWithdrawClaimableAtSlot: undefined,
+      indexedAt: Date.now(),
+    })
+
+    return existing._id
   },
 })

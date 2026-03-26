@@ -10,6 +10,8 @@ import {
   parseDepositEvent,
   parseLiquidationEvent,
   parseLpBandConfiguredEvent,
+  parseLpWithdrawalClaimedEvent,
+  parseLpWithdrawalRequestedEvent,
   parseLpPoolInitializedEvent,
   parseLpPositionOpenedEvent,
   parseMarketInitializedEvent,
@@ -52,6 +54,30 @@ const upsertLpBandConfiguredEvent = makeFunctionReference<"mutation">(
   "lpBands:upsertFromConfiguredEvent",
 )
 
+const applyLpWithdrawalRequestedEvent = makeFunctionReference<"mutation">(
+  "lpPositions:applyWithdrawalRequestedEvent",
+)
+
+const applyLpWithdrawalRequestedPoolEvent = makeFunctionReference<"mutation">(
+  "lpPools:applyWithdrawalRequestedEvent",
+)
+
+const applyLpWithdrawalClaimedEvent = makeFunctionReference<"mutation">(
+  "lpPositions:applyWithdrawalClaimedEvent",
+)
+
+const applyLpWithdrawalClaimedPoolEvent = makeFunctionReference<"mutation">(
+  "lpPools:applyWithdrawalClaimedEvent",
+)
+
+const applyLpRedemptionRequestedEvent = makeFunctionReference<"mutation">(
+  "lpRedemptions:applyRequestedEvent",
+)
+
+const applyLpRedemptionClaimedEvent = makeFunctionReference<"mutation">(
+  "lpRedemptions:applyClaimedEvent",
+)
+
 const applyDepositEvent = makeFunctionReference<"mutation">(
   "traders:applyDepositEvent",
 )
@@ -74,35 +100,42 @@ async function getTransactionLogs(args: {
   rpcUrl: string
   signature: string
 }): Promise<{ slot: bigint; logMessages: string[] }> {
-  const body = {
-    jsonrpc: "2.0",
-    id: 1,
-    method: "getTransaction",
-    params: [
-      args.signature,
-      {
-        encoding: "json",
-        maxSupportedTransactionVersion: 0,
-      },
-    ],
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const body = {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "getTransaction",
+      params: [
+        args.signature,
+        {
+          encoding: "json",
+          maxSupportedTransactionVersion: 0,
+        },
+      ],
+    }
+
+    const res = await fetch(args.rpcUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    })
+    if (!res.ok) throw new Error(`RPC getTransaction failed (${res.status})`)
+
+    const json = (await res.json()) as {
+      result: { slot: number; meta?: { logMessages?: string[] | null } } | null
+    }
+
+    const result = json.result
+    if (result) {
+      const logMessages = result.meta?.logMessages?.filter(Boolean) ?? []
+      return { slot: BigInt(result.slot), logMessages }
+    }
+
+    if (attempt < 5)
+      await new Promise((resolve) => setTimeout(resolve, 1_500 * (attempt + 1)))
   }
 
-  const res = await fetch(args.rpcUrl, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  })
-  if (!res.ok) throw new Error(`RPC getTransaction failed (${res.status})`)
-
-  const json = (await res.json()) as {
-    result: { slot: number; meta?: { logMessages?: string[] | null } } | null
-  }
-
-  const result = json.result
-  if (!result) throw new Error("Transaction not found (getTransaction result=null)")
-
-  const logMessages = result.meta?.logMessages?.filter(Boolean) ?? []
-  return { slot: BigInt(result.slot), logMessages }
+  throw new Error("Transaction not found (getTransaction result=null)")
 }
 
 export const indexMarketInitialized = actionGeneric({
@@ -164,6 +197,8 @@ export const indexTransaction = actionGeneric({
       | { type: "LpPoolInitialized"; lpPool: string; shard: string }
       | { type: "LpPositionOpened"; lpPosition: string; owner: string; shares: bigint }
       | { type: "LpBandConfigured"; lpBandConfig: string; owner: string }
+      | { type: "LpWithdrawalRequested"; lpPosition: string; owner: string; requestedShares: bigint }
+      | { type: "LpWithdrawalClaimed"; lpPosition: string; owner: string; claimedAmount: bigint }
       | { type: "TraderOpened"; trader: string; owner: string; engineIndex: number }
       | { type: "Deposit"; trader: string; owner: string; amount: bigint; engineIndex: number }
       | { type: "Crank"; market: string; shard: string; lastCrankSlot: bigint; advanced: boolean }
@@ -296,6 +331,68 @@ export const indexTransaction = actionGeneric({
             type: "LpBandConfigured",
             lpBandConfig: lpBandConfigured.lpBandConfig,
             owner: lpBandConfigured.owner,
+          })
+          continue
+        }
+
+        const lpWithdrawalRequested = parseLpWithdrawalRequestedEvent(bytes)
+        if (lpWithdrawalRequested) {
+          await ctx.runMutation(applyLpWithdrawalRequestedEvent, {
+            lpPosition: lpWithdrawalRequested.lpPosition,
+            requestedShares: lpWithdrawalRequested.requestedShares,
+            estimatedAmount: lpWithdrawalRequested.estimatedAmount,
+            claimableAtSlot: lpWithdrawalRequested.claimableAtSlot,
+          })
+          await ctx.runMutation(applyLpWithdrawalRequestedPoolEvent, {
+            lpPool: lpWithdrawalRequested.lpPool,
+            requestedShares: lpWithdrawalRequested.requestedShares,
+            estimatedAmount: lpWithdrawalRequested.estimatedAmount,
+          })
+          await ctx.runMutation(applyLpRedemptionRequestedEvent, {
+            requestSignature: args.signature,
+            requestSlot: slot,
+            market: lpWithdrawalRequested.market,
+            shard: lpWithdrawalRequested.shard,
+            lpPool: lpWithdrawalRequested.lpPool,
+            owner: lpWithdrawalRequested.owner,
+            lpPosition: lpWithdrawalRequested.lpPosition,
+            requestedShares: lpWithdrawalRequested.requestedShares,
+            estimatedAmount: lpWithdrawalRequested.estimatedAmount,
+            claimableAtSlot: lpWithdrawalRequested.claimableAtSlot,
+          })
+          indexed.push({
+            type: "LpWithdrawalRequested",
+            lpPosition: lpWithdrawalRequested.lpPosition,
+            owner: lpWithdrawalRequested.owner,
+            requestedShares: lpWithdrawalRequested.requestedShares,
+          })
+          continue
+        }
+
+        const lpWithdrawalClaimed = parseLpWithdrawalClaimedEvent(bytes)
+        if (lpWithdrawalClaimed) {
+          await ctx.runMutation(applyLpWithdrawalClaimedEvent, {
+            lpPosition: lpWithdrawalClaimed.lpPosition,
+            burnedShares: lpWithdrawalClaimed.burnedShares,
+            claimedAmount: lpWithdrawalClaimed.claimedAmount,
+          })
+          await ctx.runMutation(applyLpWithdrawalClaimedPoolEvent, {
+            lpPool: lpWithdrawalClaimed.lpPool,
+            burnedShares: lpWithdrawalClaimed.burnedShares,
+            claimedAmount: lpWithdrawalClaimed.claimedAmount,
+          })
+          await ctx.runMutation(applyLpRedemptionClaimedEvent, {
+            lpPosition: lpWithdrawalClaimed.lpPosition,
+            owner: lpWithdrawalClaimed.owner,
+            claimSignature: args.signature,
+            claimSlot: slot,
+            claimedAmount: lpWithdrawalClaimed.claimedAmount,
+          })
+          indexed.push({
+            type: "LpWithdrawalClaimed",
+            lpPosition: lpWithdrawalClaimed.lpPosition,
+            owner: lpWithdrawalClaimed.owner,
+            claimedAmount: lpWithdrawalClaimed.claimedAmount,
           })
           continue
         }

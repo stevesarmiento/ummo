@@ -60,8 +60,12 @@ pub fn handler(ctx: Context<InitLpPool>) -> Result<()> {
     lp_pool.protocol_fee_bps = DEFAULT_PROTOCOL_FEE_BPS;
     lp_pool.total_shares = 0;
     lp_pool.accounting_nav = 0;
+    lp_pool.cash_nav = 0;
+    lp_pool.estimated_nav = 0;
     lp_pool.total_deposited = 0;
     lp_pool.protocol_fee_accrued = 0;
+    lp_pool.pending_redemption_shares = 0;
+    lp_pool.pending_redemption_value = 0;
     lp_pool.created_at_slot = created_at_slot;
 
     emit!(LpPoolInitialized {

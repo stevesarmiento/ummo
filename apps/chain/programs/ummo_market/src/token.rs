@@ -1,66 +1,76 @@
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::{instruction::{AccountMeta, Instruction}, program::invoke};
+use anchor_spl::token_interface::{
+    self, Mint, TokenAccount, TokenInterface, TransferChecked,
+};
 
 use crate::error::UmmoError;
 
 pub const TOKEN_PROGRAM_ID: Pubkey = pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
-pub const TOKEN_ACCOUNT_DATA_LEN: usize = 165;
+pub const TOKEN_2022_PROGRAM_ID: Pubkey =
+    pubkey!("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 
-pub struct TokenAccountInfo {
-    pub mint: Pubkey,
-    pub owner: Pubkey,
+pub fn validate_supported_token_program(token_program_id: Pubkey) -> Result<()> {
+    require!(
+        token_program_id == TOKEN_PROGRAM_ID || token_program_id == TOKEN_2022_PROGRAM_ID,
+        UmmoError::InvalidTokenProgram
+    );
+    Ok(())
 }
 
-pub fn read_token_account(account: &UncheckedAccount) -> Result<TokenAccountInfo> {
-    require_keys_eq!(*account.owner, TOKEN_PROGRAM_ID, UmmoError::InvalidTokenAccount);
-    let data = account.try_borrow_data()?;
-    require!(data.len() >= TOKEN_ACCOUNT_DATA_LEN, UmmoError::InvalidTokenAccount);
-
-    let mint = Pubkey::new_from_array(
-        data[0..32]
-            .try_into()
-            .map_err(|_| error!(UmmoError::InvalidTokenAccount))?,
+pub fn validate_token_program_for_mint<'info>(
+    token_program: &Interface<'info, TokenInterface>,
+    mint: &InterfaceAccount<'info, Mint>,
+) -> Result<()> {
+    validate_supported_token_program(token_program.key())?;
+    require_keys_eq!(
+        token_program.key(),
+        *mint.to_account_info().owner,
+        UmmoError::InvalidTokenProgram
     );
-    let owner = Pubkey::new_from_array(
-        data[32..64]
-            .try_into()
-            .map_err(|_| error!(UmmoError::InvalidTokenAccount))?,
-    );
-
-    Ok(TokenAccountInfo { mint, owner })
+    Ok(())
 }
 
 pub fn spl_token_transfer<'info>(
-    token_program: &UncheckedAccount<'info>,
-    source: &UncheckedAccount<'info>,
-    destination: &UncheckedAccount<'info>,
+    token_program: &Interface<'info, TokenInterface>,
+    mint: &InterfaceAccount<'info, Mint>,
+    source: &InterfaceAccount<'info, TokenAccount>,
+    destination: &InterfaceAccount<'info, TokenAccount>,
     authority: &Signer<'info>,
     amount: u64,
 ) -> Result<()> {
-    require_keys_eq!(token_program.key(), TOKEN_PROGRAM_ID, UmmoError::InvalidTokenProgram);
+    validate_token_program_for_mint(token_program, mint)?;
 
-    let mut data = [0u8; 9];
-    data[0] = 3;
-    data[1..9].copy_from_slice(&amount.to_le_bytes());
-
-    let ix = Instruction {
-        program_id: TOKEN_PROGRAM_ID,
-        accounts: vec![
-            AccountMeta::new(source.key(), false),
-            AccountMeta::new(destination.key(), false),
-            AccountMeta::new_readonly(authority.key(), true),
-        ],
-        data: data.to_vec(),
+    let cpi_accounts = TransferChecked {
+        mint: mint.to_account_info(),
+        from: source.to_account_info(),
+        to: destination.to_account_info(),
+        authority: authority.to_account_info(),
     };
+    let cpi_context = CpiContext::new(token_program.to_account_info(), cpi_accounts);
+    token_interface::transfer_checked(cpi_context, amount, mint.decimals)?;
+    Ok(())
+}
 
-    invoke(
-        &ix,
-        &[
-            source.to_account_info(),
-            destination.to_account_info(),
-            authority.to_account_info(),
-        ],
-    )?;
+pub fn spl_token_transfer_signed<'info>(
+    token_program: &Interface<'info, TokenInterface>,
+    mint: &InterfaceAccount<'info, Mint>,
+    source: &InterfaceAccount<'info, TokenAccount>,
+    destination: &InterfaceAccount<'info, TokenAccount>,
+    authority: &AccountInfo<'info>,
+    signer_seeds: &[&[u8]],
+    amount: u64,
+) -> Result<()> {
+    validate_token_program_for_mint(token_program, mint)?;
 
+    let cpi_accounts = TransferChecked {
+        mint: mint.to_account_info(),
+        from: source.to_account_info(),
+        to: destination.to_account_info(),
+        authority: authority.clone(),
+    };
+    let signer_seed_groups = [signer_seeds];
+    let cpi_context = CpiContext::new(token_program.to_account_info(), cpi_accounts)
+        .with_signer(&signer_seed_groups);
+    token_interface::transfer_checked(cpi_context, amount, mint.decimals)?;
     Ok(())
 }

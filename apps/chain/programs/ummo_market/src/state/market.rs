@@ -1,5 +1,12 @@
 use anchor_lang::prelude::*;
 
+const DISCRIMINATOR_BYTES: usize = 8;
+const PUBKEY_BYTES: usize = 32;
+const U8_BYTES: usize = 1;
+const U16_BYTES: usize = 2;
+const U64_BYTES: usize = 8;
+const U128_BYTES: usize = 16;
+
 #[account]
 pub struct MarketConfig {
     pub authority: Pubkey,
@@ -12,7 +19,14 @@ pub struct MarketConfig {
 }
 
 impl MarketConfig {
-    pub const SPACE: usize = 8 + 32 + 1 + 8 + 32 + 32 + 32 + 8;
+    pub const SPACE: usize = DISCRIMINATOR_BYTES
+        + PUBKEY_BYTES
+        + U8_BYTES
+        + U64_BYTES
+        + PUBKEY_BYTES
+        + PUBKEY_BYTES
+        + PUBKEY_BYTES
+        + U64_BYTES;
 }
 
 #[account]
@@ -27,7 +41,14 @@ pub struct MarketShard {
 }
 
 impl MarketShard {
-    pub const SPACE: usize = 8 + 32 + 1 + 2 + 32 + 2 + 8 + 8;
+    pub const SPACE: usize = DISCRIMINATOR_BYTES
+        + PUBKEY_BYTES
+        + U8_BYTES
+        + U16_BYTES
+        + PUBKEY_BYTES
+        + U16_BYTES
+        + U64_BYTES
+        + U64_BYTES;
 }
 
 #[account]
@@ -41,7 +62,13 @@ pub struct Trader {
 }
 
 impl Trader {
-    pub const SPACE: usize = 8 + 32 + 32 + 32 + 1 + 2 + 8;
+    pub const SPACE: usize = DISCRIMINATOR_BYTES
+        + PUBKEY_BYTES
+        + PUBKEY_BYTES
+        + PUBKEY_BYTES
+        + U8_BYTES
+        + U16_BYTES
+        + U64_BYTES;
 }
 
 #[account]
@@ -55,13 +82,33 @@ pub struct LpPool {
     pub protocol_fee_bps: u16,
     pub total_shares: u128,
     pub accounting_nav: u128,
+    pub cash_nav: u128,
+    pub estimated_nav: u128,
     pub total_deposited: u128,
     pub protocol_fee_accrued: u128,
+    pub pending_redemption_shares: u128,
+    pub pending_redemption_value: u128,
     pub created_at_slot: u64,
 }
 
 impl LpPool {
-    pub const SPACE: usize = 8 + 32 + 32 + 32 + 1 + 2 + 2 + 2 + 16 + 16 + 16 + 16 + 8;
+    pub const SPACE: usize = DISCRIMINATOR_BYTES
+        + PUBKEY_BYTES
+        + PUBKEY_BYTES
+        + PUBKEY_BYTES
+        + U8_BYTES
+        + U16_BYTES
+        + U16_BYTES
+        + U16_BYTES
+        + U128_BYTES
+        + U128_BYTES
+        + U128_BYTES
+        + U128_BYTES
+        + U128_BYTES
+        + U128_BYTES
+        + U128_BYTES
+        + U128_BYTES
+        + U64_BYTES;
 }
 
 #[account]
@@ -70,12 +117,26 @@ pub struct LpPosition {
     pub owner: Pubkey,
     pub bump: u8,
     pub shares: u128,
+    pub locked_shares: u128,
     pub deposited_total: u128,
+    pub pending_withdraw_shares: u128,
+    pub pending_withdraw_amount: u128,
+    pub pending_withdraw_claimable_at_slot: u64,
     pub opened_at_slot: u64,
 }
 
 impl LpPosition {
-    pub const SPACE: usize = 8 + 32 + 32 + 1 + 16 + 16 + 8;
+    pub const SPACE: usize = DISCRIMINATOR_BYTES
+        + PUBKEY_BYTES
+        + PUBKEY_BYTES
+        + U8_BYTES
+        + U128_BYTES
+        + U128_BYTES
+        + U128_BYTES
+        + U128_BYTES
+        + U128_BYTES
+        + U64_BYTES
+        + U64_BYTES;
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -96,7 +157,12 @@ pub struct LpBandConfig {
 }
 
 impl LpBandConfig {
-    pub const SPACE: usize = 8 + 32 + 32 + 1 + ((8 + 2 + 2 + 2) * 3) + 8;
+    pub const SPACE: usize = DISCRIMINATOR_BYTES
+        + PUBKEY_BYTES
+        + PUBKEY_BYTES
+        + U8_BYTES
+        + ((U64_BYTES + U16_BYTES + U16_BYTES + U16_BYTES) * 3)
+        + U64_BYTES;
 }
 
 pub const SHARD_ENGINE_BYTES: usize = core::mem::size_of::<percolator::RiskEngine>();
@@ -105,5 +171,20 @@ pub struct ShardEngine;
 
 impl ShardEngine {
     pub const SPACE: usize = SHARD_ENGINE_BYTES;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fixed_account_space_constants_match_expected_lengths() {
+        assert_eq!(MarketConfig::SPACE, 153);
+        assert_eq!(MarketShard::SPACE, 93);
+        assert_eq!(Trader::SPACE, 115);
+        assert_eq!(LpPool::SPACE, 247);
+        assert_eq!(LpPosition::SPACE, 169);
+        assert_eq!(LpBandConfig::SPACE, 123);
+    }
 }
 

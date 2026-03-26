@@ -45,10 +45,47 @@ export const upsertFromInitEvent = mutationGeneric({
 
     if (existing) {
       await ctx.db.patch(existing._id, patch)
+      const tradingConfig = await ctx.db
+        .query("marketTradingConfigs")
+        .withIndex("by_market", (q) => q.eq("market", args.market))
+        .unique()
+      if (!tradingConfig) {
+        await ctx.db.insert("marketTradingConfigs", {
+          market: args.market,
+          defaultInputMode: "quote-notional",
+          maxLeverageX100: 1_000,
+          leveragePresetsX100: [200, 300, 500, 750, 1_000],
+          minOrderNotional: 5_000_000n,
+          notionalStep: 1_000_000n,
+          quantityStepQ: 10_000n,
+          initialMarginBps: 1_000,
+          maintenanceMarginBps: 500,
+          removableCollateralBufferBps: 100,
+          underlyingSymbol: "SOL",
+          collateralSymbol: "USDC",
+          indexedAt: Date.now(),
+        })
+      }
       return existing._id
     }
 
-    return await ctx.db.insert("markets", patch)
+    const marketId = await ctx.db.insert("markets", patch)
+    await ctx.db.insert("marketTradingConfigs", {
+      market: args.market,
+      defaultInputMode: "quote-notional",
+      maxLeverageX100: 1_000,
+      leveragePresetsX100: [200, 300, 500, 750, 1_000],
+      minOrderNotional: 5_000_000n,
+      notionalStep: 1_000_000n,
+      quantityStepQ: 10_000n,
+      initialMarginBps: 1_000,
+      maintenanceMarginBps: 500,
+      removableCollateralBufferBps: 100,
+      underlyingSymbol: "SOL",
+      collateralSymbol: "USDC",
+      indexedAt: Date.now(),
+    })
+    return marketId
   },
 })
 

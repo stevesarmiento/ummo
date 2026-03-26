@@ -15,6 +15,25 @@ export default defineSchema({
     .index("by_market", ["market"])
     .index("by_oracle_feed", ["oracleFeed"]),
 
+  marketTradingConfigs: defineTable({
+    market: v.string(),
+    defaultInputMode: v.union(
+      v.literal("quote-notional"),
+      v.literal("base-quantity"),
+    ),
+    maxLeverageX100: v.number(),
+    leveragePresetsX100: v.array(v.number()),
+    minOrderNotional: v.int64(),
+    notionalStep: v.int64(),
+    quantityStepQ: v.int64(),
+    initialMarginBps: v.number(),
+    maintenanceMarginBps: v.number(),
+    removableCollateralBufferBps: v.number(),
+    underlyingSymbol: v.string(),
+    collateralSymbol: v.string(),
+    indexedAt: v.number(),
+  }).index("by_market", ["market"]),
+
   shards: defineTable({
     shard: v.string(),
     market: v.string(),
@@ -61,8 +80,12 @@ export default defineSchema({
     protocolFeeBps: v.number(),
     totalShares: v.int64(),
     accountingNav: v.int64(),
+    cashNav: v.optional(v.int64()),
+    estimatedNav: v.optional(v.int64()),
     totalDeposited: v.int64(),
     protocolFeeAccrued: v.int64(),
+    pendingRedemptionShares: v.optional(v.int64()),
+    pendingRedemptionValue: v.optional(v.int64()),
     createdAtSlot: v.int64(),
     indexedAt: v.number(),
   })
@@ -77,11 +100,37 @@ export default defineSchema({
     owner: v.string(),
     lpPosition: v.string(),
     shares: v.int64(),
+    lockedShares: v.optional(v.int64()),
     depositedTotal: v.int64(),
+    pendingWithdrawShares: v.optional(v.int64()),
+    pendingWithdrawAmount: v.optional(v.int64()),
+    pendingWithdrawClaimableAtSlot: v.optional(v.int64()),
     indexedAt: v.number(),
   })
     .index("by_lp_position", ["lpPosition"])
     .index("by_lp_pool", ["lpPool"])
+    .index("by_owner", ["owner"])
+    .index("by_owner_market", ["owner", "market"]),
+
+  lpRedemptions: defineTable({
+    requestSignature: v.string(),
+    market: v.string(),
+    shard: v.string(),
+    lpPool: v.string(),
+    owner: v.string(),
+    lpPosition: v.string(),
+    requestedShares: v.int64(),
+    estimatedAmount: v.int64(),
+    claimableAtSlot: v.int64(),
+    status: v.union(v.literal("pending"), v.literal("claimed")),
+    requestSlot: v.int64(),
+    claimSignature: v.optional(v.string()),
+    claimSlot: v.optional(v.int64()),
+    claimedAmount: v.optional(v.int64()),
+    indexedAt: v.number(),
+  })
+    .index("by_request_signature", ["requestSignature"])
+    .index("by_lp_position", ["lpPosition"])
     .index("by_owner", ["owner"])
     .index("by_owner_market", ["owner", "market"]),
 
@@ -163,6 +212,9 @@ export default defineSchema({
     sizeQ: v.int64(),
     execPrice: v.int64(),
     oraclePrice: v.int64(),
+    effectiveSpreadBps: v.optional(v.number()),
+    usedFallback: v.optional(v.boolean()),
+    fallbackNotional: v.optional(v.int64()),
     nowSlot: v.int64(),
     oraclePostedSlot: v.int64(),
     indexedAt: v.number(),
@@ -179,6 +231,8 @@ export default defineSchema({
     owner: v.string(),
     engineIndex: v.optional(v.number()),
     positionSizeQ: v.int64(),
+    averageEntryPrice: v.optional(v.int64()),
+    realizedPnl: v.optional(v.int64()),
     lastExecPrice: v.int64(),
     lastOraclePrice: v.int64(),
     lastUpdatedSlot: v.int64(),
@@ -225,5 +279,22 @@ export default defineSchema({
     .index("by_signature", ["signature"])
     .index("by_owner", ["liquidateeOwner"])
     .index("by_owner_market", ["liquidateeOwner", "market"]),
+
+  quoteAnalytics: defineTable({
+    market: v.string(),
+    shard: v.string(),
+    owner: v.optional(v.string()),
+    side: v.union(v.literal("long"), v.literal("short")),
+    requestedNotional: v.int64(),
+    depthServedNotional: v.int64(),
+    fallbackNotional: v.int64(),
+    usedFallback: v.boolean(),
+    oraclePrice: v.int64(),
+    execPrice: v.int64(),
+    indexedAt: v.number(),
+  })
+    .index("by_market", ["market"])
+    .index("by_owner", ["owner"])
+    .index("by_owner_market", ["owner", "market"]),
 })
 

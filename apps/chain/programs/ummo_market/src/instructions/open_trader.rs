@@ -27,6 +27,7 @@ pub struct OpenTrader<'info> {
     )]
     pub shard: Account<'info, MarketShard>,
 
+    /// CHECK: engine account is validated by PDA seeds and passed into risk engine loader.
     #[account(mut, seeds = [ENGINE_SEED, shard.key().as_ref()], bump)]
     pub engine: UncheckedAccount<'info>,
 

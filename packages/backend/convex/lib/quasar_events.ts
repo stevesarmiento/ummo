@@ -136,6 +136,28 @@ export interface LpBandConfiguredEvent {
   updatedAtSlot: bigint
 }
 
+export interface LpWithdrawalRequestedEvent {
+  market: string
+  shard: string
+  lpPool: string
+  owner: string
+  lpPosition: string
+  requestedShares: bigint
+  estimatedAmount: bigint
+  claimableAtSlot: bigint
+}
+
+export interface LpWithdrawalClaimedEvent {
+  market: string
+  shard: string
+  lpPool: string
+  owner: string
+  lpPosition: string
+  burnedShares: bigint
+  claimedAmount: bigint
+  remainingShares: bigint
+}
+
 export const MARKET_INITIALIZED_DISCRIMINATOR = 0
 export const MARKET_INITIALIZED_BYTES_LEN = 1 + 32 * 6 + 8
 
@@ -193,6 +215,12 @@ const ANCHOR_DEPOSIT_EVENT_DISCRIMINATOR = createHash("sha256")
   .subarray(0, 8)
 const ANCHOR_DEPOSIT_EVENT_BYTES_LEN = 8 + 32 * 4 + 8 + 2 + 2 + 4
 
+const ANCHOR_WITHDRAWAL_EVENT_DISCRIMINATOR = createHash("sha256")
+  .update("event:WithdrawalEvent")
+  .digest()
+  .subarray(0, 8)
+const ANCHOR_WITHDRAWAL_EVENT_BYTES_LEN = 8 + 32 * 4 + 8 + 2 + 2 + 4 + 8 + 8 + 8
+
 const ANCHOR_TRADE_EXECUTED_DISCRIMINATOR = createHash("sha256")
   .update("event:TradeExecuted")
   .digest()
@@ -217,6 +245,18 @@ const ANCHOR_LP_BAND_CONFIGURED_DISCRIMINATOR = createHash("sha256")
   .subarray(0, 8)
 const ANCHOR_LP_BAND_CONFIGURED_BYTES_LEN =
   8 + 32 * 5 + (8 + 2 + 2 + 2) * 3 + 8
+
+const ANCHOR_LP_WITHDRAWAL_REQUESTED_DISCRIMINATOR = createHash("sha256")
+  .update("event:LpWithdrawalRequested")
+  .digest()
+  .subarray(0, 8)
+const ANCHOR_LP_WITHDRAWAL_REQUESTED_BYTES_LEN = 8 + 32 * 5 + 8 + 8 + 8
+
+const ANCHOR_LP_WITHDRAWAL_CLAIMED_DISCRIMINATOR = createHash("sha256")
+  .update("event:LpWithdrawalClaimed")
+  .digest()
+  .subarray(0, 8)
+const ANCHOR_LP_WITHDRAWAL_CLAIMED_BYTES_LEN = 8 + 32 * 5 + 8 + 8 + 8
 
 function hasPrefix(bytes: Uint8Array, prefix: Uint8Array): boolean {
   if (bytes.length < prefix.length) return false
@@ -512,6 +552,66 @@ export function parseLpBandConfiguredEvent(
   }
 }
 
+export function parseLpWithdrawalRequestedEvent(
+  bytes: Uint8Array,
+): LpWithdrawalRequestedEvent | null {
+  if (
+    bytes.length !== ANCHOR_LP_WITHDRAWAL_REQUESTED_BYTES_LEN ||
+    !hasPrefix(bytes, ANCHOR_LP_WITHDRAWAL_REQUESTED_DISCRIMINATOR)
+  )
+    return null
+
+  const market = bs58.encode(bytes.slice(8, 40))
+  const shard = bs58.encode(bytes.slice(40, 72))
+  const lpPool = bs58.encode(bytes.slice(72, 104))
+  const owner = bs58.encode(bytes.slice(104, 136))
+  const lpPosition = bs58.encode(bytes.slice(136, 168))
+  const requestedShares = readU64LE(bytes.slice(168, 176))
+  const estimatedAmount = readU64LE(bytes.slice(176, 184))
+  const claimableAtSlot = readU64LE(bytes.slice(184, 192))
+
+  return {
+    market,
+    shard,
+    lpPool,
+    owner,
+    lpPosition,
+    requestedShares,
+    estimatedAmount,
+    claimableAtSlot,
+  }
+}
+
+export function parseLpWithdrawalClaimedEvent(
+  bytes: Uint8Array,
+): LpWithdrawalClaimedEvent | null {
+  if (
+    bytes.length !== ANCHOR_LP_WITHDRAWAL_CLAIMED_BYTES_LEN ||
+    !hasPrefix(bytes, ANCHOR_LP_WITHDRAWAL_CLAIMED_DISCRIMINATOR)
+  )
+    return null
+
+  const market = bs58.encode(bytes.slice(8, 40))
+  const shard = bs58.encode(bytes.slice(40, 72))
+  const lpPool = bs58.encode(bytes.slice(72, 104))
+  const owner = bs58.encode(bytes.slice(104, 136))
+  const lpPosition = bs58.encode(bytes.slice(136, 168))
+  const burnedShares = readU64LE(bytes.slice(168, 176))
+  const claimedAmount = readU64LE(bytes.slice(176, 184))
+  const remainingShares = readU64LE(bytes.slice(184, 192))
+
+  return {
+    market,
+    shard,
+    lpPool,
+    owner,
+    lpPosition,
+    burnedShares,
+    claimedAmount,
+    remainingShares,
+  }
+}
+
 export function parseDepositEvent(bytes: Uint8Array): DepositEvent | null {
   if (bytes.length === DEPOSIT_BYTES_LEN && bytes[0] === DEPOSIT_DISCRIMINATOR) {
     const market = bs58.encode(bytes.slice(1, 33))
@@ -609,18 +709,45 @@ export function parseTradeExecutedEvent(
 }
 
 export function parseWithdrawalEvent(bytes: Uint8Array): WithdrawalEvent | null {
-  if (bytes.length !== WITHDRAWAL_BYTES_LEN) return null
-  if (bytes[0] !== WITHDRAWAL_DISCRIMINATOR) return null
+  if (bytes.length === WITHDRAWAL_BYTES_LEN && bytes[0] === WITHDRAWAL_DISCRIMINATOR) {
+    const market = bs58.encode(bytes.slice(1, 33))
+    const shard = bs58.encode(bytes.slice(33, 65))
+    const trader = bs58.encode(bytes.slice(65, 97))
+    const owner = bs58.encode(bytes.slice(97, 129))
+    const amount = readU64LE(bytes.slice(129, 137))
+    const engineIndex = readU16LE(bytes.slice(137, 139))
+    const nowSlot = readU64LE(bytes.slice(145, 153))
+    const oraclePrice = readU64LE(bytes.slice(153, 161))
+    const oraclePostedSlot = readU64LE(bytes.slice(161, 169))
 
-  const market = bs58.encode(bytes.slice(1, 33))
-  const shard = bs58.encode(bytes.slice(33, 65))
-  const trader = bs58.encode(bytes.slice(65, 97))
-  const owner = bs58.encode(bytes.slice(97, 129))
-  const amount = readU64LE(bytes.slice(129, 137))
-  const engineIndex = readU16LE(bytes.slice(137, 139))
-  const nowSlot = readU64LE(bytes.slice(145, 153))
-  const oraclePrice = readU64LE(bytes.slice(153, 161))
-  const oraclePostedSlot = readU64LE(bytes.slice(161, 169))
+    return {
+      market,
+      shard,
+      trader,
+      owner,
+      amount,
+      engineIndex,
+      nowSlot,
+      oraclePrice,
+      oraclePostedSlot,
+    }
+  }
+
+  if (
+    bytes.length !== ANCHOR_WITHDRAWAL_EVENT_BYTES_LEN ||
+    !hasPrefix(bytes, ANCHOR_WITHDRAWAL_EVENT_DISCRIMINATOR)
+  )
+    return null
+
+  const market = bs58.encode(bytes.slice(8, 40))
+  const shard = bs58.encode(bytes.slice(40, 72))
+  const trader = bs58.encode(bytes.slice(72, 104))
+  const owner = bs58.encode(bytes.slice(104, 136))
+  const amount = readU64LE(bytes.slice(136, 144))
+  const engineIndex = readU16LE(bytes.slice(144, 146))
+  const nowSlot = readU64LE(bytes.slice(152, 160))
+  const oraclePrice = readU64LE(bytes.slice(160, 168))
+  const oraclePostedSlot = readU64LE(bytes.slice(168, 176))
 
   return {
     market,

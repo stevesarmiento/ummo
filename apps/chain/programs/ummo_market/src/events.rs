@@ -54,6 +54,21 @@ pub struct DepositEvent {
 }
 
 #[event]
+pub struct WithdrawalEvent {
+    pub market: Pubkey,
+    pub shard: Pubkey,
+    pub trader: Pubkey,
+    pub owner: Pubkey,
+    pub amount: u64,
+    pub engine_index: u16,
+    pub reserved0: u16,
+    pub reserved1: u32,
+    pub now_slot: u64,
+    pub oracle_price: u64,
+    pub oracle_posted_slot: u64,
+}
+
+#[event]
 pub struct TradeExecuted {
     pub market: Pubkey,
     pub shard: Pubkey,
@@ -109,4 +124,28 @@ pub struct LpBandConfigured {
     pub third_band_spread_bps: u16,
     pub third_band_max_inventory_bps: u16,
     pub updated_at_slot: u64,
+}
+
+#[event]
+pub struct LpWithdrawalRequested {
+    pub market: Pubkey,
+    pub shard: Pubkey,
+    pub lp_pool: Pubkey,
+    pub owner: Pubkey,
+    pub lp_position: Pubkey,
+    pub requested_shares: u64,
+    pub estimated_amount: u64,
+    pub claimable_at_slot: u64,
+}
+
+#[event]
+pub struct LpWithdrawalClaimed {
+    pub market: Pubkey,
+    pub shard: Pubkey,
+    pub lp_pool: Pubkey,
+    pub owner: Pubkey,
+    pub lp_position: Pubkey,
+    pub burned_shares: u64,
+    pub claimed_amount: u64,
+    pub remaining_shares: u64,
 }

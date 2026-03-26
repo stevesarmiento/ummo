@@ -1,7 +1,7 @@
 import { actionGeneric, makeFunctionReference, queryGeneric } from "convex/server"
 import { v } from "convex/values"
 
-const MAX_CRANK_STALENESS_SLOTS = 150n
+const MAX_CRANK_STALENESS_SLOTS = 100_000_000n
 
 interface MarketRow {
   market: string
@@ -35,6 +35,15 @@ interface TradeRow {
   indexedAt: number
 }
 
+interface QuoteAnalyticsRow {
+  market: string
+  shard: string
+  fallbackNotional: bigint
+  requestedNotional: bigint
+  usedFallback: boolean
+  indexedAt: number
+}
+
 interface MatcherErrorRow {
   kind: string
   message: string
@@ -49,6 +58,7 @@ interface Snapshot {
   shards: ShardRow[]
   liquidations: LiquidationRow[]
   trades: TradeRow[]
+  quoteAnalytics: QuoteAnalyticsRow[]
 }
 
 const getSnapshotRef = makeFunctionReference<"query">("ops:getSnapshot")
@@ -97,14 +107,15 @@ export const getRecentMatcherErrors = queryGeneric({
 export const getSnapshot = queryGeneric({
   args: {},
   handler: async (ctx) => {
-    const [markets, shards, liquidations, trades] = await Promise.all([
+    const [markets, shards, liquidations, trades, quoteAnalytics] = await Promise.all([
       ctx.db.query("markets").collect() as Promise<MarketRow[]>,
       ctx.db.query("shards").collect() as Promise<ShardRow[]>,
       ctx.db.query("liquidations").collect() as Promise<LiquidationRow[]>,
       ctx.db.query("trades").collect() as Promise<TradeRow[]>,
+      ctx.db.query("quoteAnalytics").collect() as Promise<QuoteAnalyticsRow[]>,
     ])
 
-    return { markets, shards, liquidations, trades }
+    return { markets, shards, liquidations, trades, quoteAnalytics }
   },
 })
 
@@ -125,7 +136,7 @@ export const getDashboard = actionGeneric({
       >,
     ])
 
-    const { markets, shards, liquidations, trades } = snapshot
+    const { markets, shards, liquidations, trades, quoteAnalytics } = snapshot
 
     const liqCountsByShard = new Map<string, number>()
     for (const l of liquidations) {
@@ -140,6 +151,18 @@ export const getDashboard = actionGeneric({
       if (t.indexedAt < since24hMs) continue
       const key = `${t.market}:${t.shard}`
       tradeCountsByShard.set(key, (tradeCountsByShard.get(key) ?? 0) + 1)
+    }
+
+    let quotes24h = 0
+    let fallbackQuotes24h = 0
+    let requestedNotional24h = 0n
+    let fallbackNotional24h = 0n
+    for (const quote of quoteAnalytics) {
+      if (quote.indexedAt < since24hMs) continue
+      quotes24h += 1
+      requestedNotional24h += quote.requestedNotional
+      fallbackNotional24h += quote.fallbackNotional
+      if (quote.usedFallback) fallbackQuotes24h += 1
     }
 
     const shardRows = shards
@@ -170,6 +193,16 @@ export const getDashboard = actionGeneric({
       rpcUrl,
       nowSlot: nowSlot.toString(10),
       maxCrankStalenessSlots: MAX_CRANK_STALENESS_SLOTS.toString(10),
+      quoteAnalytics: {
+        quotes24h,
+        fallbackQuotes24h,
+        requestedNotional24h: requestedNotional24h.toString(10),
+        fallbackNotional24h: fallbackNotional24h.toString(10),
+        fallbackRateBps:
+          requestedNotional24h > 0n
+            ? Number((fallbackNotional24h * 10_000n) / requestedNotional24h)
+            : 0,
+      },
       markets: markets.map((m) => ({
         market: m.market,
         marketId: m.marketId.toString(10),
@@ -188,6 +221,68 @@ export const getDashboard = actionGeneric({
         rpcUrl: e.rpcUrl ?? null,
         indexedAt: e.indexedAt,
       })),
+    }
+  },
+})
+
+const getTraderViewByOwnerMarketShard = makeFunctionReference<"query">(
+  "traderViews:getByOwnerMarketShard",
+)
+const getActivityByOwnerMarketShard = makeFunctionReference<"query">(
+  "activity:getByOwnerMarketShard",
+)
+
+export const debugGetDocById = queryGeneric({
+  args: { id: v.string() },
+  handler: async (ctx, args) => {
+    const doc = await ctx.db.get(args.id as never)
+    return { id: args.id, doc }
+  },
+})
+
+export const debugGetTraderBundleById = queryGeneric({
+  args: { id: v.string(), limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const doc = (await ctx.db.get(args.id as never)) as
+      | null
+      | {
+          owner?: unknown
+          market?: unknown
+          shard?: unknown
+          trader?: unknown
+        }
+
+    if (!doc) return { id: args.id, found: false as const }
+
+    const owner = typeof doc.owner === "string" ? doc.owner : null
+    const market = typeof doc.market === "string" ? doc.market : null
+    const shard = typeof doc.shard === "string" ? doc.shard : null
+
+    if (!owner || !market || !shard) {
+      return {
+        id: args.id,
+        found: true as const,
+        doc,
+        bundle: null,
+        reason: "Document is not a trader-shaped row (missing owner/market/shard).",
+      }
+    }
+
+    const [traderView, activity] = await Promise.all([
+      ctx.runQuery(getTraderViewByOwnerMarketShard, { owner, market, shard }),
+      ctx.runQuery(getActivityByOwnerMarketShard, {
+        owner,
+        market,
+        shard,
+        limit: args.limit ?? 50,
+      }),
+    ])
+
+    return {
+      id: args.id,
+      found: true as const,
+      doc,
+      bundle: { owner, market, shard, traderView, activity },
     }
   },
 })

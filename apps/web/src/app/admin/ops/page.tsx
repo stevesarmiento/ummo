@@ -1,6 +1,6 @@
-import Link from "next/link"
-
 import { convexAction } from "@/lib/convex-http"
+import { formatFixedDecimal, toBigInt } from "@/lib/market-format"
+import { MarketShell } from "@/components/markets/market-shell"
 
 interface OpsMarketRow {
   market: string
@@ -38,6 +38,13 @@ interface OpsDashboard {
   rpcUrl: string
   nowSlot: string
   maxCrankStalenessSlots: string
+  quoteAnalytics: {
+    quotes24h: number
+    fallbackQuotes24h: number
+    requestedNotional24h: string
+    fallbackNotional24h: string
+    fallbackRateBps: number
+  }
   markets: OpsMarketRow[]
   shards: OpsShardRow[]
   matcherErrors: MatcherErrorRow[]
@@ -47,37 +54,57 @@ export default async function OpsPage() {
   const dashboard = await convexAction<OpsDashboard>("ops:getDashboard", {})
 
   return (
-    <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-black">
-      <header className="sticky top-0 z-10 border-b border-black/5 bg-white/80 backdrop-blur dark:border-white/10 dark:bg-black/60">
-        <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4 px-4 py-3">
-          <div className="flex items-center gap-3">
-            <Link href="/" className="text-sm font-semibold tracking-tight">
-              Ummo
-            </Link>
-            <span className="text-xs text-zinc-500 dark:text-zinc-400">/</span>
-            <Link href="/markets" className="text-sm font-semibold tracking-tight">
-              Markets
-            </Link>
-            <span className="text-xs text-zinc-500 dark:text-zinc-400">/</span>
-            <span className="text-sm font-semibold tracking-tight">Ops</span>
-          </div>
-          <div className="text-xs text-zinc-600 dark:text-zinc-300">
-            slot <span className="font-mono">{dashboard.nowSlot}</span>
-          </div>
+    <MarketShell
+      title="Ops dashboard"
+      description="Monitor shard freshness, matcher errors, and LP-backed market quality across the venue."
+      section="admin"
+      breadcrumbs={[{ href: "/admin/markets", label: "Admin" }, { label: "Ops" }]}
+      actions={
+        <div className="text-xs text-zinc-600 dark:text-zinc-300">
+          slot <span className="font-mono">{dashboard.nowSlot}</span>
         </div>
-      </header>
+      }
+    >
+      <div className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
+        <div>
+          RPC: <span className="font-mono">{dashboard.rpcUrl}</span>
+        </div>
+        <div>
+          Hard stale threshold:{" "}
+          <span className="font-mono">{dashboard.maxCrankStalenessSlots}</span> slots
+        </div>
+      </div>
 
-      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 py-8">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Ops dashboard</h1>
-          <div className="text-sm text-zinc-600 dark:text-zinc-300">
-            RPC: <span className="font-mono">{dashboard.rpcUrl}</span>
-          </div>
-          <div className="text-sm text-zinc-600 dark:text-zinc-300">
-            Hard stale threshold:{" "}
-            <span className="font-mono">{dashboard.maxCrankStalenessSlots}</span> slots
+      <section className="grid grid-cols-1 gap-4 md:grid-cols-4">
+        <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-black">
+          <div className="text-xs text-zinc-500 dark:text-zinc-400">Quotes 24h</div>
+          <div className="mt-1 text-lg font-semibold text-zinc-950 dark:text-zinc-50">
+            {dashboard.quoteAnalytics.quotes24h.toString(10)}
           </div>
         </div>
+        <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-black">
+          <div className="text-xs text-zinc-500 dark:text-zinc-400">Fallback quotes 24h</div>
+          <div className="mt-1 text-lg font-semibold text-zinc-950 dark:text-zinc-50">
+            {dashboard.quoteAnalytics.fallbackQuotes24h.toString(10)}
+          </div>
+        </div>
+        <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-black">
+          <div className="text-xs text-zinc-500 dark:text-zinc-400">Fallback rate</div>
+          <div className="mt-1 text-lg font-semibold text-zinc-950 dark:text-zinc-50">
+            {(dashboard.quoteAnalytics.fallbackRateBps / 100).toFixed(2)}%
+          </div>
+        </div>
+        <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-black">
+          <div className="text-xs text-zinc-500 dark:text-zinc-400">Fallback notional 24h</div>
+          <div className="mt-1 text-lg font-semibold text-zinc-950 dark:text-zinc-50">
+            {formatFixedDecimal(
+              toBigInt(dashboard.quoteAnalytics.fallbackNotional24h) ?? 0n,
+              6,
+            )}{" "}
+            USDC
+          </div>
+        </div>
+      </section>
 
         <section className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-black">
           <div className="text-sm font-medium text-zinc-950 dark:text-zinc-50">Shards</div>
@@ -173,8 +200,7 @@ export default async function OpsPage() {
             )}
           </div>
         </section>
-      </main>
-    </div>
+    </MarketShell>
   )
 }
 

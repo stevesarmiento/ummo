@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 
 use crate::{
-    constants::{MARKET_SEED, SHARD_SEED},
+    constants::{LP_BAND_SEED, LP_POOL_SEED, MARKET_SEED, SHARD_SEED},
     error::UmmoError,
     events::LpBandConfigured,
     state::{LpBandConfig, LpPool, MarketConfig, MarketShard, QuoteBand},
@@ -35,7 +35,7 @@ pub struct SetLpBandConfig<'info> {
     pub shard: Account<'info, MarketShard>,
 
     #[account(
-        seeds = [b"lp_pool", shard.key().as_ref()],
+        seeds = [LP_POOL_SEED, shard.key().as_ref()],
         bump = lp_pool.bump
     )]
     pub lp_pool: Account<'info, LpPool>,
@@ -44,7 +44,7 @@ pub struct SetLpBandConfig<'info> {
         init_if_needed,
         payer = owner,
         space = LpBandConfig::SPACE,
-        seeds = [b"lp_band", lp_pool.key().as_ref(), owner.key().as_ref()],
+        seeds = [LP_BAND_SEED, lp_pool.key().as_ref(), owner.key().as_ref()],
         bump
     )]
     pub lp_band_config: Account<'info, LpBandConfig>,
@@ -64,9 +64,15 @@ pub fn handler(ctx: Context<SetLpBandConfig>, bands: [QuoteBand; 3]) -> Result<(
 
     let now_slot = Clock::get()?.slot;
     let config = &mut ctx.accounts.lp_band_config;
-    config.lp_pool = ctx.accounts.lp_pool.key();
-    config.owner = ctx.accounts.owner.key();
-    config.bump = ctx.bumps.lp_band_config;
+    if config.updated_at_slot == 0 {
+        config.lp_pool = ctx.accounts.lp_pool.key();
+        config.owner = ctx.accounts.owner.key();
+        config.bump = ctx.bumps.lp_band_config;
+    } else {
+        require_keys_eq!(config.lp_pool, ctx.accounts.lp_pool.key(), UmmoError::Unauthorized);
+        require_keys_eq!(config.owner, ctx.accounts.owner.key(), UmmoError::Unauthorized);
+        require_eq!(config.bump, ctx.bumps.lp_band_config, UmmoError::InvalidPda);
+    }
     config.bands = bands;
     config.updated_at_slot = now_slot;
 

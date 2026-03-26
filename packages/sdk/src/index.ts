@@ -8,7 +8,7 @@ import {
 } from "@solana/kit"
 
 export const UMMO_MARKET_PROGRAM_ID = address(
-  "DiJFu657Rn1cncewnpsoWsqSxWKaQYpivVxGXSsC9vwB",
+  "Fk7Xs4araPKy6ijUSnaXBnmSV4k5FvUVRM3ukNJs9Bky",
 )
 
 export const UMMO_MARKET_PROGRAM_ADDRESS = UMMO_MARKET_PROGRAM_ID
@@ -23,6 +23,10 @@ export const CLOCK_SYSVAR_ADDRESS = address(
 
 export const TOKEN_PROGRAM_ADDRESS = address(
   "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+)
+
+export const TOKEN_2022_PROGRAM_ADDRESS = address(
+  "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
 )
 
 export const ASSOCIATED_TOKEN_PROGRAM_ADDRESS = address(
@@ -50,6 +54,12 @@ const INIT_LP_POOL_DISCRIMINATOR = new Uint8Array([
 ])
 const DEPOSIT_LP_DISCRIMINATOR = new Uint8Array([
   83, 107, 16, 26, 26, 20, 130, 56,
+])
+const REQUEST_LP_WITHDRAW_DISCRIMINATOR = new Uint8Array([
+  184, 139, 52, 50, 198, 146, 192, 123,
+])
+const CLAIM_LP_WITHDRAW_DISCRIMINATOR = new Uint8Array([
+  76, 232, 199, 204, 141, 184, 8, 200,
 ])
 const SET_LP_BAND_CONFIG_DISCRIMINATOR = new Uint8Array([
   177, 13, 242, 17, 137, 97, 151, 77,
@@ -226,12 +236,14 @@ export async function getLpBandConfigAddress(args: {
 export async function getAssociatedTokenAddress(args: {
   owner: Address
   mint: Address
+  tokenProgram?: Address
 }): Promise<Address> {
+  const tokenProgram = args.tokenProgram ?? TOKEN_PROGRAM_ADDRESS
   const [ata] = await getProgramDerivedAddress({
     programAddress: ASSOCIATED_TOKEN_PROGRAM_ADDRESS,
     seeds: [
       addressEncoder.encode(args.owner),
-      addressEncoder.encode(TOKEN_PROGRAM_ADDRESS),
+      addressEncoder.encode(tokenProgram),
       addressEncoder.encode(args.mint),
     ],
   })
@@ -294,8 +306,10 @@ export function getDepositLpInstruction(args: {
   lpPool: Address
   engine: Address
   lpPosition: Address
+  collateralMint: Address
   userCollateral: Address
   vaultCollateral: Address
+  tokenProgram: Address
   amount: bigint
 }): Instruction {
   return {
@@ -308,12 +322,69 @@ export function getDepositLpInstruction(args: {
       { address: args.lpPool, role: AccountRole.WRITABLE },
       { address: args.engine, role: AccountRole.WRITABLE },
       { address: args.lpPosition, role: AccountRole.WRITABLE },
+      { address: args.collateralMint, role: AccountRole.READONLY },
       { address: args.userCollateral, role: AccountRole.WRITABLE },
       { address: args.vaultCollateral, role: AccountRole.WRITABLE },
-      { address: TOKEN_PROGRAM_ADDRESS, role: AccountRole.READONLY },
       { address: SYSTEM_PROGRAM_ADDRESS, role: AccountRole.READONLY },
+      { address: args.tokenProgram, role: AccountRole.READONLY },
     ],
     data: concatBytes(DEPOSIT_LP_DISCRIMINATOR, u64le(args.amount)),
+  }
+}
+
+export function getRequestLpWithdrawInstruction(args: {
+  owner: Address
+  oracleFeed: Address
+  market: Address
+  shard: Address
+  lpPool: Address
+  lpPosition: Address
+  shares: bigint
+}): Instruction {
+  return {
+    programAddress: UMMO_MARKET_PROGRAM_ADDRESS,
+    accounts: [
+      { address: args.owner, role: AccountRole.WRITABLE_SIGNER },
+      { address: args.oracleFeed, role: AccountRole.READONLY },
+      { address: args.market, role: AccountRole.READONLY },
+      { address: args.shard, role: AccountRole.READONLY },
+      { address: args.lpPool, role: AccountRole.WRITABLE },
+      { address: args.lpPosition, role: AccountRole.WRITABLE },
+    ],
+    data: concatBytes(REQUEST_LP_WITHDRAW_DISCRIMINATOR, u64le(args.shares)),
+  }
+}
+
+export function getClaimLpWithdrawInstruction(args: {
+  owner: Address
+  oracleFeed: Address
+  market: Address
+  shard: Address
+  engine: Address
+  lpPool: Address
+  lpPosition: Address
+  collateralMint: Address
+  userCollateral: Address
+  vaultCollateral: Address
+  tokenProgram: Address
+}): Instruction {
+  return {
+    programAddress: UMMO_MARKET_PROGRAM_ADDRESS,
+    accounts: [
+      { address: args.owner, role: AccountRole.WRITABLE_SIGNER },
+      { address: args.oracleFeed, role: AccountRole.READONLY },
+      { address: args.market, role: AccountRole.READONLY },
+      { address: args.shard, role: AccountRole.READONLY },
+      { address: args.engine, role: AccountRole.WRITABLE },
+      { address: args.lpPool, role: AccountRole.WRITABLE },
+      { address: args.lpPosition, role: AccountRole.WRITABLE },
+      { address: args.collateralMint, role: AccountRole.READONLY },
+      { address: args.userCollateral, role: AccountRole.WRITABLE },
+      { address: args.vaultCollateral, role: AccountRole.WRITABLE },
+      { address: args.tokenProgram, role: AccountRole.READONLY },
+      { address: CLOCK_SYSVAR_ADDRESS, role: AccountRole.READONLY },
+    ],
+    data: CLAIM_LP_WITHDRAW_DISCRIMINATOR,
   }
 }
 
@@ -426,8 +497,10 @@ export function getDepositInstruction(args: {
   shard: Address
   engine: Address
   trader: Address
+  collateralMint: Address
   userCollateral: Address
   vaultCollateral: Address
+  tokenProgram: Address
   amount: bigint
 }): Instruction {
   const data = concatBytes(DEPOSIT_DISCRIMINATOR, u64le(args.amount))
@@ -441,9 +514,10 @@ export function getDepositInstruction(args: {
       { address: args.shard, role: AccountRole.READONLY },
       { address: args.engine, role: AccountRole.WRITABLE },
       { address: args.trader, role: AccountRole.READONLY },
+      { address: args.collateralMint, role: AccountRole.READONLY },
       { address: args.userCollateral, role: AccountRole.WRITABLE },
       { address: args.vaultCollateral, role: AccountRole.WRITABLE },
-      { address: TOKEN_PROGRAM_ADDRESS, role: AccountRole.READONLY },
+      { address: args.tokenProgram, role: AccountRole.READONLY },
       { address: CLOCK_SYSVAR_ADDRESS, role: AccountRole.READONLY },
     ],
     data,
@@ -457,8 +531,10 @@ export function getWithdrawInstruction(args: {
   shard: Address
   engine: Address
   trader: Address
+  collateralMint: Address
   userCollateral: Address
   vaultCollateral: Address
+  tokenProgram: Address
   amount: bigint
 }): Instruction {
   const data = concatBytes(WITHDRAW_DISCRIMINATOR, u64le(args.amount))
@@ -472,9 +548,11 @@ export function getWithdrawInstruction(args: {
       { address: args.shard, role: AccountRole.READONLY },
       { address: args.engine, role: AccountRole.WRITABLE },
       { address: args.trader, role: AccountRole.READONLY },
+      { address: args.collateralMint, role: AccountRole.READONLY },
       { address: args.userCollateral, role: AccountRole.WRITABLE },
       { address: args.vaultCollateral, role: AccountRole.WRITABLE },
-      { address: TOKEN_PROGRAM_ADDRESS, role: AccountRole.READONLY },
+      { address: args.tokenProgram, role: AccountRole.READONLY },
+      { address: CLOCK_SYSVAR_ADDRESS, role: AccountRole.READONLY },
     ],
     data,
   }

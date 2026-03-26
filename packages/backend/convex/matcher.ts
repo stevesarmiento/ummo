@@ -9,14 +9,22 @@ import { createPrivateKeyFromBytes, signBytes } from "@solana/keys"
 import { decodeBase64 } from "./lib/quasar_events"
 import { getOraclePrice1e6FromPriceUpdateV2Bytes } from "./lib/pyth_receiver"
 
+// Keep backend invariants aligned with the on-chain program.
+// See `apps/chain/programs/ummo_market/src/constants.rs`.
 const MAX_CRANK_STALENESS_SLOTS = 150n
-const MAX_ORACLE_STALENESS_SLOTS = 100_000_000n
+const MAX_ORACLE_STALENESS_SLOTS = 150n
 const MAX_ORACLE_CONFIDENCE_BPS = 200n
+
+// Extra buffer so the oracle stays fresh through wallet approval + simulation.
+const ORACLE_SIGNING_STALENESS_BUFFER_SLOTS = 50n
 
 const insertMatcherError = makeFunctionReference<"mutation">("matcherErrors:insert")
 const getLpPoolByShard = makeFunctionReference<"query">("lpPools:getByShard")
 const listLpBandsByPool = makeFunctionReference<"query">("lpBands:listByPool")
 const listLpPositionsByPool = makeFunctionReference<"query">("lpPositions:listByPool")
+const recordQuoteAnalytics = makeFunctionReference<"mutation">(
+  "quoteAnalytics:recordQuote",
+)
 
 interface LpPoolDoc {
   lpPool: string
@@ -29,6 +37,7 @@ interface LpPoolDoc {
 interface LpPositionDoc {
   owner: string
   shares: bigint
+  lockedShares?: bigint
 }
 
 interface LpBandDoc {
@@ -78,7 +87,10 @@ function buildSyntheticDepth(args: {
   if (!args.pool || args.pool.totalShares <= 0n || args.pool.accountingNav <= 0n) return []
 
   const positionsByOwner = new Map<string, bigint>()
-  for (const position of args.positions) positionsByOwner.set(position.owner, position.shares)
+  for (const position of args.positions) {
+    const activeShares = position.shares - (position.lockedShares ?? 0n)
+    positionsByOwner.set(position.owner, activeShares > 0n ? activeShares : 0n)
+  }
 
   const levels = new Map<string, SyntheticDepthLevel>()
 
@@ -132,9 +144,14 @@ function quoteFromDepth(args: {
   side: "long" | "short"
   depth: SyntheticDepthLevel[]
   fallbackSpreadBps: number
-}): { execPrice: bigint; usedFallback: boolean } {
+}): { execPrice: bigint; usedFallback: boolean; fallbackNotional: bigint; depthServedNotional: bigint } {
   if (args.desiredNotional <= 0n) {
-    return { execPrice: args.oraclePrice, usedFallback: false }
+    return {
+      execPrice: args.oraclePrice,
+      usedFallback: false,
+      fallbackNotional: 0n,
+      depthServedNotional: 0n,
+    }
   }
   let remaining = args.desiredNotional
   let weighted = 0n
@@ -146,13 +163,24 @@ function quoteFromDepth(args: {
     remaining -= take
   }
 
+  const depthServedNotional = args.desiredNotional - remaining
+
   if (remaining > 0n) {
     weighted += remaining * applySpread(args.oraclePrice, args.fallbackSpreadBps, args.side)
-    remaining = 0n
-    return { execPrice: weighted / args.desiredNotional, usedFallback: true }
+    return {
+      execPrice: weighted / args.desiredNotional,
+      usedFallback: true,
+      fallbackNotional: remaining,
+      depthServedNotional,
+    }
   }
 
-  return { execPrice: weighted / args.desiredNotional, usedFallback: false }
+  return {
+    execPrice: weighted / args.desiredNotional,
+    usedFallback: false,
+    fallbackNotional: 0n,
+    depthServedNotional,
+  }
 }
 
 async function rpcCall<T>(args: {
@@ -200,6 +228,20 @@ async function getAccountDataBase64(rpcUrl: string, address: string): Promise<st
   const base64 = data[0]
   if (!base64) throw new Error("Oracle account had empty data")
   return base64
+}
+
+function readPubkeyBase58(bytes: Uint8Array, offset: number): string {
+  return bs58.encode(bytes.slice(offset, offset + 32))
+}
+
+function decodeMarketMatcherAuthorityFromAccountData(bytes: Uint8Array): string {
+  // Anchor account layout:
+  // discriminator(8) + authority(32) + bump(1) + market_id(8) + collateral_mint(32) + oracle_feed(32) + matcher_authority(32) + created_at_slot(8)
+  const matcherOffset = 8 + 32 + 1 + 8 + 32 + 32
+  if (bytes.length < matcherOffset + 32) {
+    throw new Error("Market account data is too short")
+  }
+  return readPubkeyBase58(bytes, matcherOffset)
 }
 
 async function getOracleQuote(args: {
@@ -298,6 +340,7 @@ export const getHybridQuote = actionGeneric({
     market: v.string(),
     shard: v.string(),
     oracleFeed: v.string(),
+    owner: v.optional(v.string()),
     desiredNotional: v.optional(v.string()),
     sizeQ: v.optional(v.string()),
     side: v.union(v.literal("long"), v.literal("short")),
@@ -332,6 +375,7 @@ export const getHybridQuote = actionGeneric({
       const normalizedPositions = positions.map((position) => ({
         ...position,
         shares: normalizeBigInt(position.shares),
+        lockedShares: normalizeBigInt(position.lockedShares),
       }))
       const normalizedBands = bands.map((band) => ({
         ...band,
@@ -350,13 +394,28 @@ export const getHybridQuote = actionGeneric({
           : args.sizeQ != null
             ? (normalizeBigInt(args.sizeQ) * quote.oraclePrice) / 1_000_000n
             : 0n
-      const { execPrice, usedFallback } = quoteFromDepth({
+      const { execPrice, usedFallback, fallbackNotional, depthServedNotional } = quoteFromDepth({
         oraclePrice: quote.oraclePrice,
         desiredNotional,
         side: args.side,
         depth,
-        fallbackSpreadBps: 50,
+        fallbackSpreadBps: 40,
       })
+      const analyticsId =
+        desiredNotional > 0n
+          ? await ctx.runMutation(recordQuoteAnalytics, {
+              market: args.market,
+              shard: args.shard,
+              owner: args.owner,
+              side: args.side,
+              requestedNotional: desiredNotional,
+              depthServedNotional,
+              fallbackNotional,
+              usedFallback,
+              oraclePrice: quote.oraclePrice,
+              execPrice,
+            })
+          : null
 
       return {
         nowSlot: quote.nowSlot.toString(),
@@ -364,6 +423,9 @@ export const getHybridQuote = actionGeneric({
         oraclePrice: quote.oraclePrice.toString(),
         execPrice: execPrice.toString(),
         usedFallback,
+        fallbackNotional: fallbackNotional.toString(),
+        depthServedNotional: depthServedNotional.toString(),
+        analyticsId,
         depth: depth.map((level) => ({
           spreadBps: level.spreadBps,
           maxOracleDeviationBps: level.maxOracleDeviationBps,
@@ -387,7 +449,9 @@ export const signTransactions = actionGeneric({
   args: {
     signer: v.string(),
     oracleFeed: v.string(),
-    lastCrankSlot: v.int64(),
+    // Web client calls Convex via raw HTTP JSON and sends `lastCrankSlot` as a number.
+    // Accept all common representations and coerce to int64 (bigint) internally.
+    lastCrankSlot: v.union(v.int64(), v.number(), v.string()),
     willCrank: v.optional(v.boolean()),
     messageBase64s: v.array(v.string()),
     rpcUrl: v.optional(v.string()),
@@ -398,15 +462,29 @@ export const signTransactions = actionGeneric({
 
     try {
       const nowSlot = await getNowSlot(rpcUrl)
+      const lastCrankSlot = (() => {
+        if (typeof args.lastCrankSlot === "bigint") return args.lastCrankSlot
+        if (typeof args.lastCrankSlot === "string") return BigInt(args.lastCrankSlot)
+        const asNumber = args.lastCrankSlot
+        if (!Number.isFinite(asNumber) || !Number.isInteger(asNumber))
+          throw new Error(`Invalid lastCrankSlot ${String(args.lastCrankSlot)}`)
+        return BigInt(asNumber)
+      })()
       if (!args.willCrank) {
-        const staleness = nowSlot - args.lastCrankSlot
+        const staleness = nowSlot - lastCrankSlot
         if (staleness < 0n || staleness > MAX_CRANK_STALENESS_SLOTS) {
           throw new Error(`Crank is stale by ${staleness.toString(10)} slots`)
         }
       }
 
       // Ensure oracle is usable right now.
-      await getOracleQuote({ rpcUrl, oracleFeed: args.oracleFeed })
+      const quote = await getOracleQuote({ rpcUrl, oracleFeed: args.oracleFeed })
+      const oracleStaleness = quote.nowSlot - quote.oraclePostedSlot
+      if (oracleStaleness > MAX_ORACLE_STALENESS_SLOTS - ORACLE_SIGNING_STALENESS_BUFFER_SLOTS) {
+        throw new Error(
+          `Oracle is too close to staleness cutoff (staleness=${oracleStaleness.toString(10)} slots)`,
+        )
+      }
 
       const privateKey = await getMatcherPrivateKey(args.signer)
 
@@ -428,6 +506,21 @@ export const signTransactions = actionGeneric({
       })
       throw error
     }
+  },
+})
+
+export const getOnchainMarketMatcher = actionGeneric({
+  args: {
+    market: v.string(),
+    rpcUrl: v.optional(v.string()),
+  },
+  handler: async (_ctx, args) => {
+    const rpcUrl =
+      args.rpcUrl ?? process.env.SOLANA_RPC_URL ?? "https://api.devnet.solana.com"
+    const accountDataBase64 = await getAccountDataBase64(rpcUrl, args.market)
+    const bytes = decodeBase64(accountDataBase64)
+    const matcherAuthority = decodeMarketMatcherAuthorityFromAccountData(bytes)
+    return { matcherAuthority }
   },
 })
 

@@ -1,3 +1,4 @@
+pub mod claim_lp_withdraw;
 pub mod deposit;
 pub mod deposit_lp;
 pub mod execute_trade;
@@ -7,10 +8,12 @@ pub mod init_shard;
 pub mod keeper_crank;
 pub mod liquidate_at_oracle;
 pub mod open_trader;
+pub mod request_lp_withdraw;
 pub mod set_lp_band_config;
 pub mod set_matcher_authority;
 pub mod withdraw;
 
+pub use claim_lp_withdraw::ClaimLpWithdraw;
 pub use deposit::Deposit;
 pub use deposit_lp::DepositLp;
 pub use execute_trade::ExecuteTrade;
@@ -20,10 +23,12 @@ pub use init_shard::InitShard;
 pub use keeper_crank::KeeperCrank;
 pub use liquidate_at_oracle::LiquidateAtOracle;
 pub use open_trader::OpenTrader;
+pub use request_lp_withdraw::RequestLpWithdraw;
 pub use set_lp_band_config::SetLpBandConfig;
 pub use set_matcher_authority::SetMatcherAuthority;
 pub use withdraw::Withdraw;
 
+pub(crate) use claim_lp_withdraw::__client_accounts_claim_lp_withdraw;
 pub(crate) use deposit::__client_accounts_deposit;
 pub(crate) use deposit_lp::__client_accounts_deposit_lp;
 pub(crate) use execute_trade::__client_accounts_execute_trade;
@@ -33,6 +38,7 @@ pub(crate) use init_shard::__client_accounts_init_shard;
 pub(crate) use keeper_crank::__client_accounts_keeper_crank;
 pub(crate) use liquidate_at_oracle::__client_accounts_liquidate_at_oracle;
 pub(crate) use open_trader::__client_accounts_open_trader;
+pub(crate) use request_lp_withdraw::__client_accounts_request_lp_withdraw;
 pub(crate) use set_lp_band_config::__client_accounts_set_lp_band_config;
 pub(crate) use set_matcher_authority::__client_accounts_set_matcher_authority;
 pub(crate) use withdraw::__client_accounts_withdraw;

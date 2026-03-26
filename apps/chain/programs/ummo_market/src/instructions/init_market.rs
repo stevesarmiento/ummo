@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use anchor_spl::token_interface::Mint;
 
 use crate::{
     constants::{MARKET_SEED, SHARD_SEED},
@@ -11,8 +12,7 @@ pub struct InitMarket<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
 
-    /// CHECK: validated in client and stored verbatim.
-    pub collateral_mint: UncheckedAccount<'info>,
+    pub collateral_mint: InterfaceAccount<'info, Mint>,
 
     /// CHECK: validated in client and stored verbatim.
     pub oracle_feed: UncheckedAccount<'info>,

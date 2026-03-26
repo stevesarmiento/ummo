@@ -18,7 +18,7 @@ pub use oracle::*;
 pub use state::*;
 pub use token::*;
 
-declare_id!("DiJFu657Rn1cncewnpsoWsqSxWKaQYpivVxGXSsC9vwB");
+declare_id!("Fk7Xs4araPKy6ijUSnaXBnmSV4k5FvUVRM3ukNJs9Bky");
 
 #[program]
 pub mod ummo_market {
@@ -34,6 +34,14 @@ pub mod ummo_market {
 
     pub fn deposit_lp(ctx: Context<DepositLp>, amount: u64) -> Result<()> {
         crate::instructions::deposit_lp::handler(ctx, amount)
+    }
+
+    pub fn request_lp_withdraw(ctx: Context<RequestLpWithdraw>, shares: u64) -> Result<()> {
+        crate::instructions::request_lp_withdraw::handler(ctx, shares)
+    }
+
+    pub fn claim_lp_withdraw(ctx: Context<ClaimLpWithdraw>) -> Result<()> {
+        crate::instructions::claim_lp_withdraw::handler(ctx)
     }
 
     pub fn set_lp_band_config(

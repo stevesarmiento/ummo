@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{program::invoke_signed, system_instruction};
 
 use crate::{
-    constants::USDC_ONE,
+    constants::{MAX_CRANK_STALENESS_SLOTS, USDC_ONE},
     error::UmmoError,
     state::ShardEngine,
 };
@@ -18,7 +18,7 @@ pub fn default_risk_params() -> RiskParams {
         max_accounts: percolator::MAX_ACCOUNTS as u64,
         new_account_fee: U128::new(0),
         maintenance_fee_per_slot: U128::new(0),
-        max_crank_staleness_slots: 100_000_000,
+        max_crank_staleness_slots: MAX_CRANK_STALENESS_SLOTS,
         liquidation_fee_bps: 50,
         liquidation_fee_cap: U128::new(10_000 * (USDC_ONE as u128)),
         liquidation_buffer_bps: 200,

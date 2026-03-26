@@ -81,8 +81,10 @@ export const applyLiquidationEvent = mutationGeneric({
       owner: traderDoc.owner,
       engineIndex: traderDoc.engineIndex,
       positionSizeQ: 0n,
+      averageEntryPrice: 0n,
       lastExecPrice: args.oraclePrice,
       lastOraclePrice: args.oraclePrice,
+      realizedPnl: positionDoc?.realizedPnl ?? 0n,
       lastUpdatedSlot: args.nowSlot,
       indexedAt,
     }

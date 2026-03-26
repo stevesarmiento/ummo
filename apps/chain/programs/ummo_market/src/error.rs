@@ -48,6 +48,22 @@ pub enum UmmoError {
     RiskSideBlocked,
     #[msg("Risk engine corrupt state")]
     RiskCorruptState,
+    #[msg("LP withdrawal claim is not ready yet")]
+    ClaimNotReady,
+    #[msg("No pending LP withdrawal exists")]
+    NoPendingLpWithdrawal,
+    #[msg("LP withdrawal request already exists")]
+    PendingLpWithdrawalExists,
+    #[msg("Debug: keeper crank shard-market mismatch")]
+    DebugKeeperCrankShardMarketMismatch,
+    #[msg("Debug: keeper crank engine unauthorized")]
+    DebugKeeperCrankEngineUnauthorized,
+    #[msg("Debug: execute trade matcher mismatch")]
+    DebugExecuteTradeMatcherMismatch,
+    #[msg("Debug: execute trade crank unauthorized")]
+    DebugExecuteTradeCrankUnauthorized,
+    #[msg("Debug: execute trade engine unauthorized")]
+    DebugExecuteTradeEngineUnauthorized,
 }
 
 impl From<percolator::RiskError> for UmmoError {

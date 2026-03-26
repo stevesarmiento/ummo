@@ -1,14 +1,14 @@
 use anchor_lang::prelude::*;
 
-use crate::error::UmmoError;
+use crate::{constants::MAX_ORACLE_STALENESS_SLOTS, error::UmmoError};
 
 pub const PYTH_RECEIVER_PROGRAM_ID: Pubkey =
     pubkey!("rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ");
 
-pub const MAX_ORACLE_STALENESS_SLOTS: u64 = 100_000_000;
 pub const MAX_ORACLE_CONFIDENCE_BPS: u64 = 200;
 pub const ORACLE_PRICE_DECIMALS: i32 = 6;
 
+#[derive(Debug)]
 pub struct OraclePrice {
     pub price: u64,
     pub posted_slot: u64,
@@ -90,4 +90,50 @@ pub fn get_oracle_price_1e6(account: &UncheckedAccount, now_slot: u64) -> Result
         price: scaled_price,
         posted_slot,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anchor_lang::solana_program::account_info::AccountInfo;
+
+    fn build_price_update_data(posted_slot: u64, price: i64, conf: u64, exponent: i32) -> Vec<u8> {
+        let mut data = vec![0u8; 8 + 32 + 1 + 32 + 8 + 8 + 4 + 8 + 8 + 8 + 8 + 8];
+        let mut cursor = 8 + 32;
+        data[cursor] = 1;
+        cursor += 1 + 32;
+        data[cursor..cursor + 8].copy_from_slice(&price.to_le_bytes());
+        cursor += 8;
+        data[cursor..cursor + 8].copy_from_slice(&conf.to_le_bytes());
+        cursor += 8;
+        data[cursor..cursor + 4].copy_from_slice(&exponent.to_le_bytes());
+        cursor += 4 + 8 + 8 + 8 + 8;
+        data[cursor..cursor + 8].copy_from_slice(&posted_slot.to_le_bytes());
+        data
+    }
+
+    #[test]
+    fn rejects_stale_oracle_data() {
+        let key = Pubkey::new_unique();
+        let owner = PYTH_RECEIVER_PROGRAM_ID;
+        let lamports = Box::leak(Box::new(0u64));
+        let data = Box::leak(
+            build_price_update_data(10, 1_000_000, 1_000, -6)
+                .into_boxed_slice(),
+        );
+        let account_info = AccountInfo::new(
+            &key,
+            false,
+            false,
+            lamports,
+            data,
+            &owner,
+            false,
+            0,
+        );
+        let oracle_account = UncheckedAccount::try_from(&account_info);
+
+        let error = get_oracle_price_1e6(&oracle_account, 200).unwrap_err();
+        assert!(error.to_string().contains("Oracle is stale"));
+    }
 }

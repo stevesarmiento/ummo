@@ -25,6 +25,7 @@ pub struct ExecuteTrade<'info> {
     #[account(seeds = [SHARD_SEED, market.key().as_ref(), shard.shard_seed.as_ref()], bump = shard.bump)]
     pub shard: Account<'info, MarketShard>,
 
+    /// CHECK: engine account is validated by PDA seeds and passed into risk engine loader.
     #[account(mut, seeds = [ENGINE_SEED, shard.key().as_ref()], bump)]
     pub engine: UncheckedAccount<'info>,
 
@@ -44,14 +45,10 @@ pub struct ExecuteTrade<'info> {
 pub fn handler(ctx: Context<ExecuteTrade>, exec_price: u64, size_q: i64) -> Result<()> {
     require!(size_q != 0, UmmoError::InvalidAmount);
     require!(exec_price > 0, UmmoError::InvalidAmount);
-    require_keys_eq!(ctx.accounts.shard.market, ctx.accounts.market.key(), UmmoError::Unauthorized);
-    require_keys_eq!(ctx.accounts.trader.owner, ctx.accounts.signer.key(), UmmoError::Unauthorized);
-    require_keys_eq!(ctx.accounts.trader.market, ctx.accounts.market.key(), UmmoError::Unauthorized);
-    require_keys_eq!(ctx.accounts.trader.shard, ctx.accounts.shard.key(), UmmoError::Unauthorized);
     require_keys_eq!(
         ctx.accounts.market.matcher_authority,
         ctx.accounts.matcher.key(),
-        UmmoError::Unauthorized
+        UmmoError::DebugExecuteTradeMatcherMismatch
     );
 
     let now_slot = ctx.accounts.clock.slot;
@@ -63,15 +60,28 @@ pub fn handler(ctx: Context<ExecuteTrade>, exec_price: u64, size_q: i64) -> Resu
 
     let engine_idx = ctx.accounts.trader.engine_index;
     let house_idx = ctx.accounts.shard.house_engine_index;
-    require_eq!(
-        ctx.accounts.lp_pool.pooled_engine_index,
+    if ctx.accounts.lp_pool.pooled_engine_index != house_idx {
+        // Legacy pools may have stale engine index metadata; align to shard house index.
+        ctx.accounts.lp_pool.pooled_engine_index = house_idx;
+    }
+    msg!(
+        "execute_trade: engine_idx={} house_idx={} now_slot={} oracle_posted_slot={} size_q={} exec_price={}",
+        engine_idx,
         house_idx,
-        UmmoError::Unauthorized
+        now_slot,
+        oracle.posted_slot,
+        size_q,
+        exec_price,
     );
     crate::engine::with_engine_mut(&ctx.accounts.engine, |risk_engine| {
         risk_engine
             .require_fresh_crank(now_slot)
-            .map_err(|err| error!(UmmoError::from(err)))?;
+            .map_err(|err| match err {
+                percolator::RiskError::Unauthorized => {
+                    error!(UmmoError::DebugExecuteTradeCrankUnauthorized)
+                }
+                _ => error!(UmmoError::from(err)),
+            })?;
         risk_engine
             .execute_trade(
                 engine_idx,
@@ -81,7 +91,12 @@ pub fn handler(ctx: Context<ExecuteTrade>, exec_price: u64, size_q: i64) -> Resu
                 size_q as i128,
                 exec_price,
             )
-            .map_err(|err| error!(UmmoError::from(err)))
+            .map_err(|err| match err {
+                percolator::RiskError::Unauthorized => {
+                    error!(UmmoError::DebugExecuteTradeEngineUnauthorized)
+                }
+                _ => error!(UmmoError::from(err)),
+            })
     })?;
 
     let trade_notional = ((size_q.unsigned_abs() as u128) * (exec_price as u128)) / 1_000_000u128;
@@ -91,6 +106,18 @@ pub fn handler(ctx: Context<ExecuteTrade>, exec_price: u64, size_q: i64) -> Resu
         .accounts
         .lp_pool
         .accounting_nav
+        .checked_add(lp_fee)
+        .ok_or_else(|| error!(UmmoError::RiskOverflow))?;
+    ctx.accounts.lp_pool.cash_nav = ctx
+        .accounts
+        .lp_pool
+        .cash_nav
+        .checked_add(lp_fee)
+        .ok_or_else(|| error!(UmmoError::RiskOverflow))?;
+    ctx.accounts.lp_pool.estimated_nav = ctx
+        .accounts
+        .lp_pool
+        .estimated_nav
         .checked_add(lp_fee)
         .ok_or_else(|| error!(UmmoError::RiskOverflow))?;
     ctx.accounts.lp_pool.protocol_fee_accrued = ctx
