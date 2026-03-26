@@ -21,9 +21,9 @@ custom-panic = []
 
 
 [dependencies]
-anchor-lang = "0.32.1"
+anchor-lang = { version = "0.32.1", features = ["init-if-needed"] }
 bytemuck = { version = "1.24.0", features = ["derive"] }
-percolator = { path = "../../../../crates/percolator-kernel" }
+percolator = { path = "../../../../crates/percolator-kernel", features = ["v0-32"] }
 
 
 [lints.rust]

@@ -37,5 +37,6 @@ yarn-debug.log*
 yarn-error.log*
 
 .agents/
+.cursor/
 /docs/
 /references/

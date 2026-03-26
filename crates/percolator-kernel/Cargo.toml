@@ -17,6 +17,7 @@ proptest = "1.4"
 [features]
 default = []
 test = []  # Use MAX_ACCOUNTS=64 for tests
+v0-32 = []  # Use MAX_ACCOUNTS=32 for the v0 on-chain baseline
 fuzz = []  # Enable fuzzing tests
 host = []  # Enable host-only helpers like RiskEngine::new
 

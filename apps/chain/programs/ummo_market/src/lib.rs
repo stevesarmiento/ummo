@@ -3,7 +3,9 @@ pub mod error;
 pub mod events;
 pub mod engine;
 pub mod instructions;
+pub mod oracle;
 pub mod state;
+pub mod token;
 
 use anchor_lang::prelude::*;
 
@@ -12,7 +14,9 @@ pub use error::*;
 pub use events::*;
 pub use engine::*;
 pub use instructions::*;
+pub use oracle::*;
 pub use state::*;
+pub use token::*;
 
 declare_id!("DiJFu657Rn1cncewnpsoWsqSxWKaQYpivVxGXSsC9vwB");
 
@@ -22,6 +26,21 @@ pub mod ummo_market {
 
     pub fn init_market(ctx: Context<InitMarket>, market_id: u64) -> Result<()> {
         crate::instructions::init_market::handler(ctx, market_id)
+    }
+
+    pub fn init_lp_pool(ctx: Context<InitLpPool>) -> Result<()> {
+        crate::instructions::init_lp_pool::handler(ctx)
+    }
+
+    pub fn deposit_lp(ctx: Context<DepositLp>, amount: u64) -> Result<()> {
+        crate::instructions::deposit_lp::handler(ctx, amount)
+    }
+
+    pub fn set_lp_band_config(
+        ctx: Context<SetLpBandConfig>,
+        bands: [QuoteBand; 3],
+    ) -> Result<()> {
+        crate::instructions::set_lp_band_config::handler(ctx, bands)
     }
 
     pub fn deposit(ctx: Context<Deposit>, amount: u64) -> Result<()> {

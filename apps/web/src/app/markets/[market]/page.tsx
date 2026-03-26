@@ -182,6 +182,7 @@ export default async function MarketPage(props: {
           <MarketAdminClient
             market={doc.market}
             authority={doc.authority}
+            collateralMint={doc.collateralMint}
             shard={selectedShard?.shard ?? null}
             oracleFeed={doc.oracleFeed}
             matcherAuthority={doc.matcherAuthority}

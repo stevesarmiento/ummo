@@ -51,6 +51,66 @@ export default defineSchema({
     indexedAt: v.number(),
   }).index("by_indexedAt", ["indexedAt"]),
 
+  lpPools: defineTable({
+    lpPool: v.string(),
+    market: v.string(),
+    shard: v.string(),
+    collateralMint: v.string(),
+    pooledEngineIndex: v.number(),
+    lpFeeBps: v.number(),
+    protocolFeeBps: v.number(),
+    totalShares: v.int64(),
+    accountingNav: v.int64(),
+    totalDeposited: v.int64(),
+    protocolFeeAccrued: v.int64(),
+    createdAtSlot: v.int64(),
+    indexedAt: v.number(),
+  })
+    .index("by_lp_pool", ["lpPool"])
+    .index("by_market", ["market"])
+    .index("by_shard", ["shard"]),
+
+  lpPositions: defineTable({
+    lpPool: v.string(),
+    market: v.string(),
+    shard: v.string(),
+    owner: v.string(),
+    lpPosition: v.string(),
+    shares: v.int64(),
+    depositedTotal: v.int64(),
+    indexedAt: v.number(),
+  })
+    .index("by_lp_position", ["lpPosition"])
+    .index("by_lp_pool", ["lpPool"])
+    .index("by_owner", ["owner"])
+    .index("by_owner_market", ["owner", "market"]),
+
+  lpBandConfigs: defineTable({
+    lpPool: v.string(),
+    market: v.string(),
+    shard: v.string(),
+    owner: v.string(),
+    lpBandConfig: v.string(),
+    firstBandMaxNotional: v.int64(),
+    firstBandMaxOracleDeviationBps: v.number(),
+    firstBandSpreadBps: v.number(),
+    firstBandMaxInventoryBps: v.number(),
+    secondBandMaxNotional: v.int64(),
+    secondBandMaxOracleDeviationBps: v.number(),
+    secondBandSpreadBps: v.number(),
+    secondBandMaxInventoryBps: v.number(),
+    thirdBandMaxNotional: v.int64(),
+    thirdBandMaxOracleDeviationBps: v.number(),
+    thirdBandSpreadBps: v.number(),
+    thirdBandMaxInventoryBps: v.number(),
+    updatedAtSlot: v.int64(),
+    indexedAt: v.number(),
+  })
+    .index("by_lp_band_config", ["lpBandConfig"])
+    .index("by_lp_pool", ["lpPool"])
+    .index("by_owner", ["owner"])
+    .index("by_owner_market", ["owner", "market"]),
+
   traders: defineTable({
     market: v.string(),
     shard: v.string(),

@@ -33,6 +33,9 @@ export const MARKET_SEED = "market"
 export const SHARD_SEED = "shard"
 export const ENGINE_SEED = "engine"
 export const TRADER_SEED = "trader"
+export const LP_POOL_SEED = "lp_pool"
+export const LP_POSITION_SEED = "lp_position"
+export const LP_BAND_SEED = "lp_band"
 
 export const MAX_CRANK_STALENESS_SLOTS = 150n
 export const POSITION_SCALE_Q = 1_000_000n
@@ -41,6 +44,15 @@ const addressEncoder = getAddressEncoder()
 
 const INIT_MARKET_DISCRIMINATOR = new Uint8Array([
   33, 253, 15, 116, 89, 25, 127, 236,
+])
+const INIT_LP_POOL_DISCRIMINATOR = new Uint8Array([
+  246, 49, 33, 164, 206, 183, 249, 160,
+])
+const DEPOSIT_LP_DISCRIMINATOR = new Uint8Array([
+  83, 107, 16, 26, 26, 20, 130, 56,
+])
+const SET_LP_BAND_CONFIG_DISCRIMINATOR = new Uint8Array([
+  177, 13, 242, 17, 137, 97, 151, 77,
 ])
 const DEPOSIT_DISCRIMINATOR = new Uint8Array([
   242, 35, 198, 137, 82, 225, 242, 182,
@@ -98,6 +110,20 @@ function i64le(value: bigint): Uint8Array {
     v >>= 8n
   }
   return out
+}
+
+function quoteBandBytes(args: {
+  maxNotional: bigint
+  maxOracleDeviationBps: number
+  spreadBps: number
+  maxInventoryBps: number
+}): Uint8Array {
+  return concatBytes(
+    u64le(args.maxNotional),
+    u16le(args.maxOracleDeviationBps),
+    u16le(args.spreadBps),
+    u16le(args.maxInventoryBps),
+  )
 }
 
 function concatBytes(...parts: Uint8Array[]): Uint8Array {
@@ -159,6 +185,44 @@ export async function getTraderAddress(args: {
   return trader
 }
 
+export async function getLpPoolAddress(args: { shard: Address }): Promise<Address> {
+  const [lpPool] = await getProgramDerivedAddress({
+    programAddress: UMMO_MARKET_PROGRAM_ADDRESS,
+    seeds: [LP_POOL_SEED, addressEncoder.encode(args.shard)],
+  })
+  return lpPool
+}
+
+export async function getLpPositionAddress(args: {
+  lpPool: Address
+  owner: Address
+}): Promise<Address> {
+  const [lpPosition] = await getProgramDerivedAddress({
+    programAddress: UMMO_MARKET_PROGRAM_ADDRESS,
+    seeds: [
+      LP_POSITION_SEED,
+      addressEncoder.encode(args.lpPool),
+      addressEncoder.encode(args.owner),
+    ],
+  })
+  return lpPosition
+}
+
+export async function getLpBandConfigAddress(args: {
+  lpPool: Address
+  owner: Address
+}): Promise<Address> {
+  const [lpBand] = await getProgramDerivedAddress({
+    programAddress: UMMO_MARKET_PROGRAM_ADDRESS,
+    seeds: [
+      LP_BAND_SEED,
+      addressEncoder.encode(args.lpPool),
+      addressEncoder.encode(args.owner),
+    ],
+  })
+  return lpBand
+}
+
 export async function getAssociatedTokenAddress(args: {
   owner: Address
   mint: Address
@@ -198,6 +262,89 @@ export function getInitMarketInstruction(args: {
       { address: SYSTEM_PROGRAM_ADDRESS, role: AccountRole.READONLY },
     ],
     data,
+  }
+}
+
+export function getInitLpPoolInstruction(args: {
+  payer: Address
+  oracleFeed: Address
+  market: Address
+  shard: Address
+  lpPool: Address
+}): Instruction {
+  return {
+    programAddress: UMMO_MARKET_PROGRAM_ADDRESS,
+    accounts: [
+      { address: args.payer, role: AccountRole.WRITABLE_SIGNER },
+      { address: args.oracleFeed, role: AccountRole.READONLY },
+      { address: args.market, role: AccountRole.READONLY },
+      { address: args.shard, role: AccountRole.READONLY },
+      { address: args.lpPool, role: AccountRole.WRITABLE },
+      { address: SYSTEM_PROGRAM_ADDRESS, role: AccountRole.READONLY },
+    ],
+    data: INIT_LP_POOL_DISCRIMINATOR,
+  }
+}
+
+export function getDepositLpInstruction(args: {
+  owner: Address
+  oracleFeed: Address
+  market: Address
+  shard: Address
+  lpPool: Address
+  engine: Address
+  lpPosition: Address
+  userCollateral: Address
+  vaultCollateral: Address
+  amount: bigint
+}): Instruction {
+  return {
+    programAddress: UMMO_MARKET_PROGRAM_ADDRESS,
+    accounts: [
+      { address: args.owner, role: AccountRole.WRITABLE_SIGNER },
+      { address: args.oracleFeed, role: AccountRole.READONLY },
+      { address: args.market, role: AccountRole.READONLY },
+      { address: args.shard, role: AccountRole.READONLY },
+      { address: args.lpPool, role: AccountRole.WRITABLE },
+      { address: args.engine, role: AccountRole.WRITABLE },
+      { address: args.lpPosition, role: AccountRole.WRITABLE },
+      { address: args.userCollateral, role: AccountRole.WRITABLE },
+      { address: args.vaultCollateral, role: AccountRole.WRITABLE },
+      { address: TOKEN_PROGRAM_ADDRESS, role: AccountRole.READONLY },
+      { address: SYSTEM_PROGRAM_ADDRESS, role: AccountRole.READONLY },
+    ],
+    data: concatBytes(DEPOSIT_LP_DISCRIMINATOR, u64le(args.amount)),
+  }
+}
+
+export function getSetLpBandConfigInstruction(args: {
+  owner: Address
+  oracleFeed: Address
+  market: Address
+  shard: Address
+  lpPool: Address
+  lpBandConfig: Address
+  bands: Array<{
+    maxNotional: bigint
+    maxOracleDeviationBps: number
+    spreadBps: number
+    maxInventoryBps: number
+  }>
+}): Instruction {
+  if (args.bands.length !== 3) throw new Error("bands must contain exactly 3 items")
+  const bandBytes = args.bands.map((band) => quoteBandBytes(band))
+  return {
+    programAddress: UMMO_MARKET_PROGRAM_ADDRESS,
+    accounts: [
+      { address: args.owner, role: AccountRole.WRITABLE_SIGNER },
+      { address: args.oracleFeed, role: AccountRole.READONLY },
+      { address: args.market, role: AccountRole.READONLY },
+      { address: args.shard, role: AccountRole.READONLY },
+      { address: args.lpPool, role: AccountRole.READONLY },
+      { address: args.lpBandConfig, role: AccountRole.WRITABLE },
+      { address: SYSTEM_PROGRAM_ADDRESS, role: AccountRole.READONLY },
+    ],
+    data: concatBytes(SET_LP_BAND_CONFIG_DISCRIMINATOR, ...bandBytes),
   }
 }
 
@@ -297,6 +444,7 @@ export function getDepositInstruction(args: {
       { address: args.userCollateral, role: AccountRole.WRITABLE },
       { address: args.vaultCollateral, role: AccountRole.WRITABLE },
       { address: TOKEN_PROGRAM_ADDRESS, role: AccountRole.READONLY },
+      { address: CLOCK_SYSVAR_ADDRESS, role: AccountRole.READONLY },
     ],
     data,
   }
@@ -339,6 +487,7 @@ export function getExecuteTradeInstruction(args: {
   market: Address
   shard: Address
   engine: Address
+  lpPool: Address
   trader: Address
   execPrice: bigint
   sizeQ: bigint
@@ -358,7 +507,9 @@ export function getExecuteTradeInstruction(args: {
       { address: args.market, role: AccountRole.READONLY },
       { address: args.shard, role: AccountRole.READONLY },
       { address: args.engine, role: AccountRole.WRITABLE },
+      { address: args.lpPool, role: AccountRole.WRITABLE },
       { address: args.trader, role: AccountRole.READONLY },
+      { address: CLOCK_SYSVAR_ADDRESS, role: AccountRole.READONLY },
     ],
     data,
   }

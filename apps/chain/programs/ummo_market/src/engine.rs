@@ -18,7 +18,7 @@ pub fn default_risk_params() -> RiskParams {
         max_accounts: percolator::MAX_ACCOUNTS as u64,
         new_account_fee: U128::new(0),
         maintenance_fee_per_slot: U128::new(0),
-        max_crank_staleness_slots: crate::constants::MAX_CRANK_STALENESS_SLOTS,
+        max_crank_staleness_slots: 100_000_000,
         liquidation_fee_bps: 50,
         liquidation_fee_cap: U128::new(10_000 * (USDC_ONE as u128)),
         liquidation_buffer_bps: 200,

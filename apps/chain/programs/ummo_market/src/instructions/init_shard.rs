@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 
 use crate::{
     constants::{ENGINE_SEED, MARKET_SEED, SHARD_SEED},
-    engine::{add_house_lp, create_engine_account, init_engine},
+    engine::{add_house_lp, create_engine_account, init_engine, with_engine_mut},
     error::UmmoError,
     events::ShardInitialized,
     state::{MarketConfig, MarketShard},
@@ -70,6 +70,12 @@ pub fn handler(ctx: Context<InitShard>, shard_id: u16) -> Result<()> {
         &engine_seeds,
     )?;
     init_engine(&ctx.accounts.engine)?;
+    with_engine_mut(&ctx.accounts.engine, |risk_engine| {
+        risk_engine.last_crank_slot = created_at_slot;
+        risk_engine.last_full_sweep_start_slot = created_at_slot;
+        risk_engine.last_full_sweep_completed_slot = created_at_slot;
+        Ok(())
+    })?;
     shard.house_engine_index = add_house_lp(&ctx.accounts.engine, &ctx.accounts.market.matcher_authority)?;
 
     emit!(ShardInitialized {

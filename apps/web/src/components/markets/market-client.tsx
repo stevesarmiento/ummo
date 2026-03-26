@@ -27,6 +27,7 @@ import {
   getExecuteTradeInstruction,
   getKeeperCrankInstruction,
   getInitShardInstruction,
+  getLpPoolAddress,
   getLiquidateAtOracleInstruction,
   getOpenTraderInstruction,
   getShardAddress,
@@ -503,6 +504,7 @@ export function MarketClient(props: MarketClientProps) {
     setIsSubmitting(true)
     try {
       const engine = await getEngineAddress({ shard: shardAddress })
+      const lpPool = await getLpPoolAddress({ shard: shardAddress })
       const trader = await getTraderAddress({ shard: shardAddress, owner: ownerAddress })
 
       const ix = getOpenTraderInstruction({
@@ -545,6 +547,7 @@ export function MarketClient(props: MarketClientProps) {
     setIsSubmitting(true)
     try {
       const engine = await getEngineAddress({ shard: shardAddress })
+      const lpPool = await getLpPoolAddress({ shard: shardAddress })
       const trader = await getTraderAddress({ shard: shardAddress, owner: ownerAddress })
 
       const userCollateral = await getAssociatedTokenAddress({
@@ -751,6 +754,7 @@ export function MarketClient(props: MarketClientProps) {
     setIsSubmitting(true)
     try {
       const engine = await getEngineAddress({ shard: shardAddress })
+      const lpPool = await getLpPoolAddress({ shard: shardAddress })
       const trader = await getTraderAddress({ shard: shardAddress, owner: ownerAddress })
 
       const ixs: Instruction[] = []
@@ -777,6 +781,7 @@ export function MarketClient(props: MarketClientProps) {
         market: marketAddress,
         shard: shardAddress,
         engine,
+        lpPool,
         trader,
         execPrice: quote.execPrice,
         sizeQ,

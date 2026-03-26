@@ -94,6 +94,48 @@ export interface MatcherAuthorityUpdatedEvent {
   nowSlot: bigint
 }
 
+export interface LpPoolInitializedEvent {
+  market: string
+  shard: string
+  lpPool: string
+  collateralMint: string
+  pooledEngineIndex: number
+  lpFeeBps: number
+  protocolFeeBps: number
+  createdAtSlot: bigint
+}
+
+export interface LpPositionOpenedEvent {
+  market: string
+  shard: string
+  lpPool: string
+  owner: string
+  lpPosition: string
+  shares: bigint
+  accountingNav: bigint
+}
+
+export interface LpBandConfiguredEvent {
+  market: string
+  shard: string
+  lpPool: string
+  owner: string
+  lpBandConfig: string
+  firstBandMaxNotional: bigint
+  firstBandMaxOracleDeviationBps: number
+  firstBandSpreadBps: number
+  firstBandMaxInventoryBps: number
+  secondBandMaxNotional: bigint
+  secondBandMaxOracleDeviationBps: number
+  secondBandSpreadBps: number
+  secondBandMaxInventoryBps: number
+  thirdBandMaxNotional: bigint
+  thirdBandMaxOracleDeviationBps: number
+  thirdBandSpreadBps: number
+  thirdBandMaxInventoryBps: number
+  updatedAtSlot: bigint
+}
+
 export const MARKET_INITIALIZED_DISCRIMINATOR = 0
 export const MARKET_INITIALIZED_BYTES_LEN = 1 + 32 * 6 + 8
 
@@ -144,6 +186,37 @@ const ANCHOR_TRADER_OPENED_DISCRIMINATOR = createHash("sha256")
   .digest()
   .subarray(0, 8)
 const ANCHOR_TRADER_OPENED_BYTES_LEN = 8 + 32 * 4 + 2
+
+const ANCHOR_DEPOSIT_EVENT_DISCRIMINATOR = createHash("sha256")
+  .update("event:DepositEvent")
+  .digest()
+  .subarray(0, 8)
+const ANCHOR_DEPOSIT_EVENT_BYTES_LEN = 8 + 32 * 4 + 8 + 2 + 2 + 4
+
+const ANCHOR_TRADE_EXECUTED_DISCRIMINATOR = createHash("sha256")
+  .update("event:TradeExecuted")
+  .digest()
+  .subarray(0, 8)
+const ANCHOR_TRADE_EXECUTED_BYTES_LEN = 8 + 32 * 4 + 8 * 5
+
+const ANCHOR_LP_POOL_INITIALIZED_DISCRIMINATOR = createHash("sha256")
+  .update("event:LpPoolInitialized")
+  .digest()
+  .subarray(0, 8)
+const ANCHOR_LP_POOL_INITIALIZED_BYTES_LEN = 8 + 32 * 4 + 2 + 2 + 2 + 8
+
+const ANCHOR_LP_POSITION_OPENED_DISCRIMINATOR = createHash("sha256")
+  .update("event:LpPositionOpened")
+  .digest()
+  .subarray(0, 8)
+const ANCHOR_LP_POSITION_OPENED_BYTES_LEN = 8 + 32 * 5 + 8 + 8
+
+const ANCHOR_LP_BAND_CONFIGURED_DISCRIMINATOR = createHash("sha256")
+  .update("event:LpBandConfigured")
+  .digest()
+  .subarray(0, 8)
+const ANCHOR_LP_BAND_CONFIGURED_BYTES_LEN =
+  8 + 32 * 5 + (8 + 2 + 2 + 2) * 3 + 8
 
 function hasPrefix(bytes: Uint8Array, prefix: Uint8Array): boolean {
   if (bytes.length < prefix.length) return false
@@ -331,18 +404,138 @@ export function parseTraderOpenedEvent(bytes: Uint8Array): TraderOpenedEvent | n
   return { market, shard, trader, owner, engineIndex }
 }
 
+export function parseLpPoolInitializedEvent(
+  bytes: Uint8Array,
+): LpPoolInitializedEvent | null {
+  if (
+    bytes.length !== ANCHOR_LP_POOL_INITIALIZED_BYTES_LEN ||
+    !hasPrefix(bytes, ANCHOR_LP_POOL_INITIALIZED_DISCRIMINATOR)
+  )
+    return null
+
+  const market = bs58.encode(bytes.slice(8, 40))
+  const shard = bs58.encode(bytes.slice(40, 72))
+  const lpPool = bs58.encode(bytes.slice(72, 104))
+  const collateralMint = bs58.encode(bytes.slice(104, 136))
+  const pooledEngineIndex = readU16LE(bytes.slice(136, 138))
+  const lpFeeBps = readU16LE(bytes.slice(138, 140))
+  const protocolFeeBps = readU16LE(bytes.slice(140, 142))
+  const createdAtSlot = readU64LE(bytes.slice(142, 150))
+
+  return {
+    market,
+    shard,
+    lpPool,
+    collateralMint,
+    pooledEngineIndex,
+    lpFeeBps,
+    protocolFeeBps,
+    createdAtSlot,
+  }
+}
+
+export function parseLpPositionOpenedEvent(
+  bytes: Uint8Array,
+): LpPositionOpenedEvent | null {
+  if (
+    bytes.length !== ANCHOR_LP_POSITION_OPENED_BYTES_LEN ||
+    !hasPrefix(bytes, ANCHOR_LP_POSITION_OPENED_DISCRIMINATOR)
+  )
+    return null
+
+  const market = bs58.encode(bytes.slice(8, 40))
+  const shard = bs58.encode(bytes.slice(40, 72))
+  const lpPool = bs58.encode(bytes.slice(72, 104))
+  const owner = bs58.encode(bytes.slice(104, 136))
+  const lpPosition = bs58.encode(bytes.slice(136, 168))
+  const shares = readU64LE(bytes.slice(168, 176))
+  const accountingNav = readU64LE(bytes.slice(176, 184))
+
+  return {
+    market,
+    shard,
+    lpPool,
+    owner,
+    lpPosition,
+    shares,
+    accountingNav,
+  }
+}
+
+export function parseLpBandConfiguredEvent(
+  bytes: Uint8Array,
+): LpBandConfiguredEvent | null {
+  if (
+    bytes.length !== ANCHOR_LP_BAND_CONFIGURED_BYTES_LEN ||
+    !hasPrefix(bytes, ANCHOR_LP_BAND_CONFIGURED_DISCRIMINATOR)
+  )
+    return null
+
+  const market = bs58.encode(bytes.slice(8, 40))
+  const shard = bs58.encode(bytes.slice(40, 72))
+  const lpPool = bs58.encode(bytes.slice(72, 104))
+  const owner = bs58.encode(bytes.slice(104, 136))
+  const lpBandConfig = bs58.encode(bytes.slice(136, 168))
+  const firstBandMaxNotional = readU64LE(bytes.slice(168, 176))
+  const firstBandMaxOracleDeviationBps = readU16LE(bytes.slice(176, 178))
+  const firstBandSpreadBps = readU16LE(bytes.slice(178, 180))
+  const firstBandMaxInventoryBps = readU16LE(bytes.slice(180, 182))
+  const secondBandMaxNotional = readU64LE(bytes.slice(182, 190))
+  const secondBandMaxOracleDeviationBps = readU16LE(bytes.slice(190, 192))
+  const secondBandSpreadBps = readU16LE(bytes.slice(192, 194))
+  const secondBandMaxInventoryBps = readU16LE(bytes.slice(194, 196))
+  const thirdBandMaxNotional = readU64LE(bytes.slice(196, 204))
+  const thirdBandMaxOracleDeviationBps = readU16LE(bytes.slice(204, 206))
+  const thirdBandSpreadBps = readU16LE(bytes.slice(206, 208))
+  const thirdBandMaxInventoryBps = readU16LE(bytes.slice(208, 210))
+  const updatedAtSlot = readU64LE(bytes.slice(210, 218))
+
+  return {
+    market,
+    shard,
+    lpPool,
+    owner,
+    lpBandConfig,
+    firstBandMaxNotional,
+    firstBandMaxOracleDeviationBps,
+    firstBandSpreadBps,
+    firstBandMaxInventoryBps,
+    secondBandMaxNotional,
+    secondBandMaxOracleDeviationBps,
+    secondBandSpreadBps,
+    secondBandMaxInventoryBps,
+    thirdBandMaxNotional,
+    thirdBandMaxOracleDeviationBps,
+    thirdBandSpreadBps,
+    thirdBandMaxInventoryBps,
+    updatedAtSlot,
+  }
+}
+
 export function parseDepositEvent(bytes: Uint8Array): DepositEvent | null {
-  if (bytes.length !== DEPOSIT_BYTES_LEN) return null
-  if (bytes[0] !== DEPOSIT_DISCRIMINATOR) return null
+  if (bytes.length === DEPOSIT_BYTES_LEN && bytes[0] === DEPOSIT_DISCRIMINATOR) {
+    const market = bs58.encode(bytes.slice(1, 33))
+    const shard = bs58.encode(bytes.slice(33, 65))
+    const trader = bs58.encode(bytes.slice(65, 97))
+    const owner = bs58.encode(bytes.slice(97, 129))
+    const amount = readU64LE(bytes.slice(129, 137))
+    const engineIndex = readU16LE(bytes.slice(137, 139))
 
-  const market = bs58.encode(bytes.slice(1, 33))
-  const shard = bs58.encode(bytes.slice(33, 65))
-  const trader = bs58.encode(bytes.slice(65, 97))
-  const owner = bs58.encode(bytes.slice(97, 129))
-  const amount = readU64LE(bytes.slice(129, 137))
-  const engineIndex = readU16LE(bytes.slice(137, 139))
+    return { market, shard, trader, owner, amount, engineIndex }
+  }
 
-  // Reserved bytes currently ignored.
+  if (
+    bytes.length !== ANCHOR_DEPOSIT_EVENT_BYTES_LEN ||
+    !hasPrefix(bytes, ANCHOR_DEPOSIT_EVENT_DISCRIMINATOR)
+  )
+    return null
+
+  const market = bs58.encode(bytes.slice(8, 40))
+  const shard = bs58.encode(bytes.slice(40, 72))
+  const trader = bs58.encode(bytes.slice(72, 104))
+  const owner = bs58.encode(bytes.slice(104, 136))
+  const amount = readU64LE(bytes.slice(136, 144))
+  const engineIndex = readU16LE(bytes.slice(144, 146))
   return { market, shard, trader, owner, amount, engineIndex }
 }
 
@@ -362,18 +555,45 @@ export function parseCrankEvent(bytes: Uint8Array): CrankEvent | null {
 export function parseTradeExecutedEvent(
   bytes: Uint8Array,
 ): TradeExecutedEvent | null {
-  if (bytes.length !== TRADE_EXECUTED_BYTES_LEN) return null
-  if (bytes[0] !== TRADE_EXECUTED_DISCRIMINATOR) return null
+  if (bytes.length === TRADE_EXECUTED_BYTES_LEN && bytes[0] === TRADE_EXECUTED_DISCRIMINATOR) {
+    const market = bs58.encode(bytes.slice(1, 33))
+    const shard = bs58.encode(bytes.slice(33, 65))
+    const trader = bs58.encode(bytes.slice(65, 97))
+    const owner = bs58.encode(bytes.slice(97, 129))
+    const sizeQ = readI64LE(bytes.slice(129, 137))
+    const execPrice = readU64LE(bytes.slice(137, 145))
+    const oraclePrice = readU64LE(bytes.slice(145, 153))
+    const nowSlot = readU64LE(bytes.slice(153, 161))
+    const oraclePostedSlot = readU64LE(bytes.slice(161, 169))
 
-  const market = bs58.encode(bytes.slice(1, 33))
-  const shard = bs58.encode(bytes.slice(33, 65))
-  const trader = bs58.encode(bytes.slice(65, 97))
-  const owner = bs58.encode(bytes.slice(97, 129))
-  const sizeQ = readI64LE(bytes.slice(129, 137))
-  const execPrice = readU64LE(bytes.slice(137, 145))
-  const oraclePrice = readU64LE(bytes.slice(145, 153))
-  const nowSlot = readU64LE(bytes.slice(153, 161))
-  const oraclePostedSlot = readU64LE(bytes.slice(161, 169))
+    return {
+      market,
+      shard,
+      trader,
+      owner,
+      sizeQ,
+      execPrice,
+      oraclePrice,
+      nowSlot,
+      oraclePostedSlot,
+    }
+  }
+
+  if (
+    bytes.length !== ANCHOR_TRADE_EXECUTED_BYTES_LEN ||
+    !hasPrefix(bytes, ANCHOR_TRADE_EXECUTED_DISCRIMINATOR)
+  )
+    return null
+
+  const market = bs58.encode(bytes.slice(8, 40))
+  const shard = bs58.encode(bytes.slice(40, 72))
+  const trader = bs58.encode(bytes.slice(72, 104))
+  const owner = bs58.encode(bytes.slice(104, 136))
+  const sizeQ = readI64LE(bytes.slice(136, 144))
+  const execPrice = readU64LE(bytes.slice(144, 152))
+  const oraclePrice = readU64LE(bytes.slice(152, 160))
+  const nowSlot = readU64LE(bytes.slice(160, 168))
+  const oraclePostedSlot = readU64LE(bytes.slice(168, 176))
 
   return {
     market,

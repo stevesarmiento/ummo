@@ -9,6 +9,9 @@ import {
   parseCrankEvent,
   parseDepositEvent,
   parseLiquidationEvent,
+  parseLpBandConfiguredEvent,
+  parseLpPoolInitializedEvent,
+  parseLpPositionOpenedEvent,
   parseMarketInitializedEvent,
   parseMatcherAuthorityUpdatedEvent,
   parseShardInitializedEvent,
@@ -31,6 +34,22 @@ const upsertFromShardInitializedEvent = makeFunctionReference<"mutation">(
 
 const upsertFromOpenedEvent = makeFunctionReference<"mutation">(
   "traders:upsertFromOpenedEvent",
+)
+
+const upsertLpPoolFromInitializedEvent = makeFunctionReference<"mutation">(
+  "lpPools:upsertFromInitializedEvent",
+)
+
+const applyLpDepositEvent = makeFunctionReference<"mutation">(
+  "lpPools:applyLpDepositEvent",
+)
+
+const upsertLpPositionFromOpenedEvent = makeFunctionReference<"mutation">(
+  "lpPositions:upsertFromOpenedEvent",
+)
+
+const upsertLpBandConfiguredEvent = makeFunctionReference<"mutation">(
+  "lpBands:upsertFromConfiguredEvent",
 )
 
 const applyDepositEvent = makeFunctionReference<"mutation">(
@@ -142,6 +161,9 @@ export const indexTransaction = actionGeneric({
       | { type: "MarketInitialized"; market: string; shard: string; marketId: bigint }
       | { type: "ShardInitialized"; market: string; shard: string; shardId: number }
       | { type: "MatcherAuthorityUpdated"; market: string; newMatcherAuthority: string }
+      | { type: "LpPoolInitialized"; lpPool: string; shard: string }
+      | { type: "LpPositionOpened"; lpPosition: string; owner: string; shares: bigint }
+      | { type: "LpBandConfigured"; lpBandConfig: string; owner: string }
       | { type: "TraderOpened"; trader: string; owner: string; engineIndex: number }
       | { type: "Deposit"; trader: string; owner: string; amount: bigint; engineIndex: number }
       | { type: "Crank"; market: string; shard: string; lastCrankSlot: bigint; advanced: boolean }
@@ -221,6 +243,59 @@ export const indexTransaction = actionGeneric({
             type: "MatcherAuthorityUpdated",
             market: matcherUpdated.market,
             newMatcherAuthority: matcherUpdated.newMatcherAuthority,
+          })
+          continue
+        }
+
+        const lpPoolInitialized = parseLpPoolInitializedEvent(bytes)
+        if (lpPoolInitialized) {
+          await ctx.runMutation(upsertLpPoolFromInitializedEvent, {
+            ...lpPoolInitialized,
+            createdAtSlot: lpPoolInitialized.createdAtSlot,
+          })
+          indexed.push({
+            type: "LpPoolInitialized",
+            lpPool: lpPoolInitialized.lpPool,
+            shard: lpPoolInitialized.shard,
+          })
+          continue
+        }
+
+        const lpPositionOpened = parseLpPositionOpenedEvent(bytes)
+        if (lpPositionOpened) {
+          await ctx.runMutation(applyLpDepositEvent, {
+            ...lpPositionOpened,
+            shares: lpPositionOpened.shares,
+            accountingNav: lpPositionOpened.accountingNav,
+          })
+          await ctx.runMutation(upsertLpPositionFromOpenedEvent, {
+            depositedTotal: lpPositionOpened.accountingNav,
+            lpPool: lpPositionOpened.lpPool,
+            market: lpPositionOpened.market,
+            shard: lpPositionOpened.shard,
+            owner: lpPositionOpened.owner,
+            lpPosition: lpPositionOpened.lpPosition,
+            shares: lpPositionOpened.shares,
+          })
+          indexed.push({
+            type: "LpPositionOpened",
+            lpPosition: lpPositionOpened.lpPosition,
+            owner: lpPositionOpened.owner,
+            shares: lpPositionOpened.shares,
+          })
+          continue
+        }
+
+        const lpBandConfigured = parseLpBandConfiguredEvent(bytes)
+        if (lpBandConfigured) {
+          await ctx.runMutation(upsertLpBandConfiguredEvent, {
+            ...lpBandConfigured,
+            updatedAtSlot: lpBandConfigured.updatedAtSlot,
+          })
+          indexed.push({
+            type: "LpBandConfigured",
+            lpBandConfig: lpBandConfigured.lpBandConfig,
+            owner: lpBandConfigured.owner,
           })
           continue
         }
@@ -355,7 +430,7 @@ export const indexTransaction = actionGeneric({
       }
     }
 
-    if (!indexed.length) throw new Error("No known Quasar event found in transaction logs")
+    if (!indexed.length) throw new Error("No known protocol event found in transaction logs")
     return { signature: args.signature, slot, indexed }
   },
 })
