@@ -51,7 +51,9 @@ async function main() {
   const marketId = BigInt(getArg("--market-id") ?? process.env.UMMO_MARKET_ID ?? "1")
   const shardId = Number(getArg("--shard-id") ?? process.env.UMMO_SHARD_ID ?? "1")
 
-  if (marketId < 0n || marketId > 18_446_744_073_709_551_615n)
+  const U64_MIN = BigInt(0)
+  const U64_MAX = BigInt("18446744073709551615")
+  if (marketId < U64_MIN || marketId > U64_MAX)
     throw new Error("--market-id out of range for u64")
   if (!Number.isInteger(shardId) || shardId < 0 || shardId > 65_535)
     throw new Error("--shard-id out of range for u16")
@@ -86,8 +88,20 @@ async function main() {
     [Buffer.from("engine"), shard.toBuffer()],
     programId,
   )
+  const [riskState] = PublicKey.findProgramAddressSync(
+    [Buffer.from("risk_state"), shard.toBuffer()],
+    programId,
+  )
+  const [rails] = PublicKey.findProgramAddressSync(
+    [Buffer.from("rails"), shard.toBuffer()],
+    programId,
+  )
   const [lpPool] = PublicKey.findProgramAddressSync(
     [Buffer.from("lp_pool"), shard.toBuffer()],
+    programId,
+  )
+  const [matcherAllowlist] = PublicKey.findProgramAddressSync(
+    [Buffer.from("matcher_allowlist"), market.toBuffer()],
     programId,
   )
 
@@ -112,6 +126,8 @@ async function main() {
             market: market.toBase58(),
             shard: shard.toBase58(),
             engine: engine.toBase58(),
+            riskState: riskState.toBase58(),
+            rails: rails.toBase58(),
             lpPool: lpPool.toBase58(),
             shardSeed: oracleFeed.toBase58(),
           },
@@ -135,6 +151,19 @@ async function main() {
     })
     .rpc()
 
+  // Create the matcher allowlist PDA (disabled by default) so `execute_trade`
+  // always has enough account keys even when allowlisting isn't enabled.
+  const setMatcherAllowlistSig = await program.methods
+    .setMatcherAllowlist(false, [])
+    .accounts({
+      authority: payerKeypair.publicKey,
+      oracleFeed,
+      market,
+      matcherAllowlist,
+      systemProgram: SystemProgram.programId,
+    })
+    .rpc()
+
   const initShardSig = await program.methods
     .initShard(shardId)
     .accounts({
@@ -143,6 +172,8 @@ async function main() {
       market,
       shardSeed: oracleFeed,
       shard,
+      riskState,
+      rails,
       engine,
       systemProgram: SystemProgram.programId,
     })
@@ -171,8 +202,10 @@ async function main() {
         collateralMint: collateralMint.toBase58(),
         oracleFeed: oracleFeed.toBase58(),
         matcherAuthority: matcherAuthority.toBase58(),
+        matcherAllowlist: matcherAllowlist.toBase58(),
         signatures: {
           initMarket: initMarketSig,
+          setMatcherAllowlist: setMatcherAllowlistSig,
           initShard: initShardSig,
           initLpPool: initLpPoolSig,
         },

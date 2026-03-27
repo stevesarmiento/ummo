@@ -11,26 +11,43 @@ export const getByOwnerMarketShard = queryGeneric({
   handler: async (ctx, args) => {
     const limit = Math.max(1, Math.min(args.limit ?? 25, 100))
 
-    const [trades, withdrawals, depositsAll, liquidations] = await Promise.all([
-      ctx.db
-        .query("trades")
-        .withIndex("by_owner", (q) => q.eq("owner", args.owner))
-        .collect(),
-      ctx.db
-        .query("withdrawals")
-        .withIndex("by_owner", (q) => q.eq("owner", args.owner))
-        .collect(),
-      ctx.db
-        .query("deposits")
-        .withIndex("by_owner", (q) => q.eq("owner", args.owner))
-        .collect(),
-      ctx.db
-        .query("liquidations")
-        .withIndex("by_owner", (q) => q.eq("liquidateeOwner", args.owner))
-        .collect(),
-    ])
+    const [trades, withdrawals, depositsAll, liquidations, fundingPaymentsAll, housekeepingAll] =
+      await Promise.all([
+        ctx.db
+          .query("trades")
+          .withIndex("by_owner", (q) => q.eq("owner", args.owner))
+          .collect(),
+        ctx.db
+          .query("withdrawals")
+          .withIndex("by_owner", (q) => q.eq("owner", args.owner))
+          .collect(),
+        ctx.db
+          .query("deposits")
+          .withIndex("by_owner", (q) => q.eq("owner", args.owner))
+          .collect(),
+        ctx.db
+          .query("liquidations")
+          .withIndex("by_owner", (q) => q.eq("liquidateeOwner", args.owner))
+          .collect(),
+        ctx.db
+          .query("fundingPayments")
+          .withIndex("by_owner", (q) => q.eq("owner", args.owner))
+          .order("desc")
+          .take(limit * 2),
+        ctx.db
+          .query("housekeepingEvents")
+          .withIndex("by_owner", (q) => q.eq("owner", args.owner))
+          .order("desc")
+          .take(limit * 2),
+      ])
 
     const deposits = depositsAll.filter((d) => d.market === args.market && d.shard === args.shard)
+    const fundingPayments = fundingPaymentsAll.filter(
+      (p) => p.market === args.market && p.shard === args.shard,
+    )
+    const housekeeping = housekeepingAll.filter(
+      (h) => h.market === args.market && h.shard === args.shard,
+    )
 
     const events = [
       ...trades
@@ -80,7 +97,51 @@ export const getByOwnerMarketShard = queryGeneric({
           nowSlot: l.nowSlot,
           indexedAt: l.indexedAt,
         })),
-    ]
+      ...fundingPayments.map((p) => ({
+        type: "FundingPayment" as const,
+        signature: p.signature,
+        slot: p.slot,
+        market: p.market,
+        shard: p.shard,
+        deltaFundingPnl: p.deltaFundingPnl,
+        cumulativeFundingPnl: p.cumulativeFundingPnl,
+        nowSlot: p.nowSlot,
+        indexedAt: p.indexedAt,
+      })),
+      ...housekeeping.flatMap((h): any[] => {
+        if (h.kind === "traderClosed")
+          return [
+            {
+              type: "TraderClosed" as const,
+              signature: h.signature,
+              slot: h.slot,
+              market: h.market,
+              shard: h.shard,
+              trader: h.trader,
+              amountReturned: h.amountReturned,
+              nowSlot: h.nowSlot,
+              indexedAt: h.indexedAt,
+            },
+          ]
+
+        if (h.kind === "accountClosed")
+          return [
+            {
+              type: "AccountClosed" as const,
+              signature: h.signature,
+              slot: h.slot,
+              market: h.market,
+              shard: h.shard,
+              engineIndex: h.engineIndex,
+              amountReturned: h.amountReturned,
+              nowSlot: h.nowSlot,
+              indexedAt: h.indexedAt,
+            },
+          ]
+
+        return []
+      }),
+    ] as Array<{ slot: bigint; indexedAt: number } & Record<string, unknown>>
 
     events.sort((a, b) => {
       const slotDiff = Number(b.slot - a.slot)

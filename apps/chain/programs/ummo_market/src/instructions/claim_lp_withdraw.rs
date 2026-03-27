@@ -2,12 +2,13 @@ use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
 use crate::{
-    constants::{ENGINE_SEED, LP_POOL_SEED, LP_POSITION_SEED, MARKET_SEED, SHARD_SEED},
+    constants::{ENGINE_SEED, LP_POOL_SEED, LP_POSITION_SEED, MARKET_SEED, RISK_STATE_SEED, SHARD_SEED},
     engine::with_engine_mut,
     error::UmmoError,
     events::LpWithdrawalClaimed,
     oracle::get_oracle_price_1e6,
-    state::{LpPool, LpPosition, MarketConfig, MarketShard},
+    risk::update_risk_state_and_get_price_1e6,
+    state::{LpPool, LpPosition, MarketConfig, MarketShard, RiskState},
     token::{spl_token_transfer_signed, validate_token_program_for_mint},
 };
 
@@ -27,6 +28,9 @@ pub struct ClaimLpWithdraw<'info> {
         bump = shard.bump
     )]
     pub shard: Account<'info, MarketShard>,
+
+    #[account(mut, seeds = [RISK_STATE_SEED, shard.key().as_ref()], bump = risk_state.bump)]
+    pub risk_state: Account<'info, RiskState>,
 
     /// CHECK: engine account is validated by PDA seeds and passed into risk engine loader.
     #[account(mut, seeds = [ENGINE_SEED, shard.key().as_ref()], bump)]
@@ -120,12 +124,18 @@ pub fn handler(ctx: Context<ClaimLpWithdraw>) -> Result<()> {
 
     let now_slot = ctx.accounts.clock.slot;
     let oracle = get_oracle_price_1e6(&ctx.accounts.oracle_feed, now_slot)?;
+    let risk_price = update_risk_state_and_get_price_1e6(
+        &mut ctx.accounts.risk_state,
+        oracle.price,
+        now_slot,
+    )?;
     with_engine_mut(&ctx.accounts.engine, |risk_engine| {
         risk_engine
-            .withdraw(
+            .withdraw_with_risk_price(
                 ctx.accounts.lp_pool.pooled_engine_index,
                 amount,
                 oracle.price,
+                risk_price,
                 now_slot,
             )
             .map_err(|err| error!(UmmoError::from(err)))

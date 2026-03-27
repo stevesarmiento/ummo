@@ -26,6 +26,12 @@ pub enum UmmoError {
     OracleConfidenceTooWide,
     #[msg("Execution price too far from oracle")]
     ExecPriceTooFarFromOracle,
+    #[msg("Matcher is not authorized")]
+    MatcherNotAuthorized,
+    #[msg("Trade notional exceeds protocol rails")]
+    TradeNotionalTooLarge,
+    #[msg("Funding update too soon")]
+    FundingUpdateTooSoon,
     #[msg("Risk engine insufficient balance")]
     RiskInsufficientBalance,
     #[msg("Risk engine undercollateralized")]

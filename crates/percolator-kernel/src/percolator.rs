@@ -85,13 +85,14 @@ use wide_math::{
     U256, I256,
     mul_div_floor_u128, mul_div_ceil_u128,
     wide_mul_div_floor_u128,
-    wide_signed_mul_div_floor_from_k_pair,
     wide_mul_div_ceil_u128_or_over_i128max, OverI128Magnitude,
     saturating_mul_u128_u64,
     fee_debt_u128_checked,
     mul_div_floor_u256_with_rem,
     ceil_div_positive_checked,
 };
+
+pub use wide_math::wide_signed_mul_div_floor_from_k_pair;
 
 // ============================================================================
 // Core Data Structures
@@ -2299,7 +2300,23 @@ impl RiskEngine {
         oracle_price: u64,
         now_slot: u64,
     ) -> Result<()> {
+        self.withdraw_with_risk_price(idx, amount, oracle_price, oracle_price, now_slot)
+    }
+
+    /// withdraw_with_risk_price: touch/settle at `oracle_price`, but apply
+    /// solvency gates (IM) using `risk_price` for conservative margining.
+    pub fn withdraw_with_risk_price(
+        &mut self,
+        idx: u16,
+        amount: u128,
+        oracle_price: u64,
+        risk_price: u64,
+        now_slot: u64,
+    ) -> Result<()> {
         if oracle_price == 0 || oracle_price > MAX_ORACLE_PRICE {
+            return Err(RiskError::Overflow);
+        }
+        if risk_price == 0 || risk_price > MAX_ORACLE_PRICE {
             return Err(RiskError::Overflow);
         }
 
@@ -2333,7 +2350,8 @@ impl RiskEngine {
             let old_vault = self.vault;
             self.set_capital(idx as usize, post_cap);
             self.vault = U128::new(sub_u128(self.vault.get(), amount));
-            let passes_im = self.is_above_initial_margin(&self.accounts[idx as usize], idx as usize, oracle_price);
+            let passes_im =
+                self.is_above_initial_margin(&self.accounts[idx as usize], idx as usize, risk_price);
             // Revert both
             self.set_capital(idx as usize, old_cap);
             self.vault = old_vault;
@@ -2402,7 +2420,25 @@ impl RiskEngine {
         size_q: i128,
         exec_price: u64,
     ) -> Result<()> {
+        self.execute_trade_with_risk_price(a, b, oracle_price, oracle_price, now_slot, size_q, exec_price)
+    }
+
+    /// execute_trade_with_risk_price: touch/settle at `oracle_price`, but apply
+    /// margin gates using `risk_price` for conservative sizing and withdrawals.
+    pub fn execute_trade_with_risk_price(
+        &mut self,
+        a: u16,
+        b: u16,
+        oracle_price: u64,
+        risk_price: u64,
+        now_slot: u64,
+        size_q: i128,
+        exec_price: u64,
+    ) -> Result<()> {
         if oracle_price == 0 || oracle_price > MAX_ORACLE_PRICE {
+            return Err(RiskError::Overflow);
+        }
+        if risk_price == 0 || risk_price > MAX_ORACLE_PRICE {
             return Err(RiskError::Overflow);
         }
         if exec_price == 0 || exec_price > MAX_ORACLE_PRICE {
@@ -2445,14 +2481,14 @@ impl RiskEngine {
 
         // Steps 14-16: capture pre-trade MM requirements and raw maintenance buffers
         let mm_req_pre_a = {
-            let not = self.notional(a as usize, oracle_price);
+            let not = self.notional(a as usize, risk_price);
             core::cmp::max(
                     mul_div_floor_u128(not, self.params.maintenance_margin_bps as u128, 10_000),
                     self.params.min_nonzero_mm_req
                 )
         };
         let mm_req_pre_b = {
-            let not = self.notional(b as usize, oracle_price);
+            let not = self.notional(b as usize, risk_price);
             core::cmp::max(
                     mul_div_floor_u128(not, self.params.maintenance_margin_bps as u128, 10_000),
                     self.params.min_nonzero_mm_req
@@ -2560,7 +2596,7 @@ impl RiskEngine {
 
         // Step 29: post-trade margin enforcement (spec §10.5)
         self.enforce_post_trade_margin(
-            a as usize, b as usize, oracle_price,
+            a as usize, b as usize, risk_price,
             &old_eff_a, &new_eff_a, &old_eff_b, &new_eff_b,
             buffer_pre_a, buffer_pre_b, fee,
         )?;
@@ -2639,7 +2675,7 @@ impl RiskEngine {
         &self,
         a: usize,
         b: usize,
-        oracle_price: u64,
+        margin_price: u64,
         old_eff_a: &i128,
         new_eff_a: &i128,
         old_eff_b: &i128,
@@ -2648,15 +2684,15 @@ impl RiskEngine {
         buffer_pre_b: I256,
         fee: u128,
     ) -> Result<()> {
-        self.enforce_one_side_margin(a, oracle_price, old_eff_a, new_eff_a, buffer_pre_a, fee)?;
-        self.enforce_one_side_margin(b, oracle_price, old_eff_b, new_eff_b, buffer_pre_b, fee)?;
+        self.enforce_one_side_margin(a, margin_price, old_eff_a, new_eff_a, buffer_pre_a, fee)?;
+        self.enforce_one_side_margin(b, margin_price, old_eff_b, new_eff_b, buffer_pre_b, fee)?;
         Ok(())
     }
 
     fn enforce_one_side_margin(
         &self,
         idx: usize,
-        oracle_price: u64,
+        margin_price: u64,
         old_eff: &i128,
         new_eff: &i128,
         buffer_pre: I256,
@@ -2689,10 +2725,10 @@ impl RiskEngine {
 
         if risk_increasing {
             // Require initial-margin healthy using Eq_init_net_i
-            if !self.is_above_initial_margin(&self.accounts[idx], idx, oracle_price) {
+            if !self.is_above_initial_margin(&self.accounts[idx], idx, margin_price) {
                 return Err(RiskError::Undercollateralized);
             }
-        } else if self.is_above_maintenance_margin(&self.accounts[idx], idx, oracle_price) {
+        } else if self.is_above_maintenance_margin(&self.accounts[idx], idx, margin_price) {
             // Maintenance healthy: allow
         } else if strictly_reducing {
             // v11.26 §10.5 step 29: strict risk-reducing exemption (fee-neutral).
@@ -2705,7 +2741,7 @@ impl RiskEngine {
             // Fee-neutral post equity and buffer
             let maint_raw_fee_neutral = maint_raw_wide_post.checked_add(fee_wide).expect("I256 add");
             let mm_req_post = {
-                let not = self.notional(idx, oracle_price);
+                let not = self.notional(idx, margin_price);
                 core::cmp::max(
                     mul_div_floor_u128(not, self.params.maintenance_margin_bps as u128, 10_000),
                     self.params.min_nonzero_mm_req
@@ -2716,7 +2752,7 @@ impl RiskEngine {
             // Recover pre-trade raw equity from buffer_pre + MM_req_pre
             let mm_req_pre = {
                 let not_pre = if *old_eff == 0 { 0u128 } else {
-                    mul_div_floor_u128(old_eff.unsigned_abs(), oracle_price as u128, POS_SCALE)
+                    mul_div_floor_u128(old_eff.unsigned_abs(), margin_price as u128, POS_SCALE)
                 };
                 core::cmp::max(
                     mul_div_floor_u128(not_pre, self.params.maintenance_margin_bps as u128, 10_000),
@@ -2796,13 +2832,25 @@ impl RiskEngine {
         now_slot: u64,
         oracle_price: u64,
     ) -> Result<bool> {
+        self.liquidate_at_oracle_with_risk_price(idx, now_slot, oracle_price, oracle_price)
+    }
+
+    /// liquidate_at_oracle_with_risk_price: touch/settle at `oracle_price`, but
+    /// determine liquidation eligibility using `risk_price`.
+    pub fn liquidate_at_oracle_with_risk_price(
+        &mut self,
+        idx: u16,
+        now_slot: u64,
+        oracle_price: u64,
+        risk_price: u64,
+    ) -> Result<bool> {
         let mut ctx = InstructionContext::new();
 
         // Per spec §9.4: the enclosing top-level instruction must call
         // touch_account_full before the liquidation routine.
         self.touch_account_full(idx as usize, oracle_price, now_slot)?;
 
-        let result = self.liquidate_at_oracle_internal(idx, now_slot, oracle_price, &mut ctx)?;
+        let result = self.liquidate_at_oracle_internal(idx, now_slot, oracle_price, risk_price, &mut ctx)?;
 
         // End-of-instruction resets must run unconditionally because
         // touch_account_full mutates state even when liquidation doesn't proceed.
@@ -2824,6 +2872,7 @@ impl RiskEngine {
         idx: u16,
         _now_slot: u64,
         oracle_price: u64,
+        risk_price: u64,
         ctx: &mut InstructionContext,
     ) -> Result<bool> {
         if idx as usize >= MAX_ACCOUNTS || !self.is_used(idx as usize) {
@@ -2831,6 +2880,9 @@ impl RiskEngine {
         }
 
         if oracle_price == 0 || oracle_price > MAX_ORACLE_PRICE {
+            return Err(RiskError::Overflow);
+        }
+        if risk_price == 0 || risk_price > MAX_ORACLE_PRICE {
             return Err(RiskError::Overflow);
         }
 
@@ -2844,7 +2896,7 @@ impl RiskEngine {
         }
 
         // Step 3: check liquidation eligibility (spec §9.3)
-        if self.is_above_maintenance_margin(&self.accounts[idx as usize], idx as usize, oracle_price) {
+        if self.is_above_maintenance_margin(&self.accounts[idx as usize], idx as usize, risk_price) {
             return Ok(false);
         }
 
@@ -2911,7 +2963,23 @@ impl RiskEngine {
         ordered_candidates: &[u16],
         max_revalidations: u16,
     ) -> Result<CrankOutcome> {
+        self.keeper_crank_with_risk_price(now_slot, oracle_price, oracle_price, ordered_candidates, max_revalidations)
+    }
+
+    /// keeper_crank_with_risk_price: accrue/mark at `oracle_price`, but decide
+    /// liquidation eligibility using `risk_price`.
+    pub fn keeper_crank_with_risk_price(
+        &mut self,
+        now_slot: u64,
+        oracle_price: u64,
+        risk_price: u64,
+        ordered_candidates: &[u16],
+        max_revalidations: u16,
+    ) -> Result<CrankOutcome> {
         if oracle_price == 0 || oracle_price > MAX_ORACLE_PRICE {
+            return Err(RiskError::Overflow);
+        }
+        if risk_price == 0 || risk_price > MAX_ORACLE_PRICE {
             return Err(RiskError::Overflow);
         }
 
@@ -2991,8 +3059,8 @@ impl RiskEngine {
             if !ctx.pending_reset_long && !ctx.pending_reset_short {
                 let eff = self.effective_pos_q(cidx);
                 if eff != 0 {
-                    if !self.is_above_maintenance_margin(&self.accounts[cidx], cidx, oracle_price) {
-                        match self.liquidate_at_oracle_internal(candidate_idx, now_slot, oracle_price, &mut ctx) {
+                    if !self.is_above_maintenance_margin(&self.accounts[cidx], cidx, risk_price) {
+                        match self.liquidate_at_oracle_internal(candidate_idx, now_slot, oracle_price, risk_price, &mut ctx) {
                             Ok(true) => { num_liquidations += 1; }
                             Ok(false) => {}
                             Err(e) => return Err(e),
@@ -3496,6 +3564,80 @@ pub fn compute_trade_pnl(size_q: i128, price_diff: i128) -> Result<i128> {
             Some(v) if v <= i128::MAX as u128 => Ok(v as i128),
             _ => Err(RiskError::Overflow),
         }
+    }
+}
+
+#[cfg(all(test, feature = "test"))]
+mod tests {
+    use super::*;
+
+    const USDC_ONE: u128 = 1_000_000;
+
+    fn default_params() -> RiskParams {
+        RiskParams {
+            warmup_period_slots: 0,
+            maintenance_margin_bps: 500,
+            initial_margin_bps: 1000,
+            trading_fee_bps: 10,
+            max_accounts: MAX_ACCOUNTS as u64,
+            new_account_fee: U128::new(0),
+            maintenance_fee_per_slot: U128::new(0),
+            max_crank_staleness_slots: 150,
+            liquidation_fee_bps: 50,
+            liquidation_fee_cap: U128::new(10_000 * USDC_ONE),
+            liquidation_buffer_bps: 200,
+            min_liquidation_abs: U128::new(USDC_ONE),
+            min_initial_deposit: U128::new(USDC_ONE),
+            min_nonzero_mm_req: USDC_ONE,
+            min_nonzero_im_req: 2 * USDC_ONE,
+        }
+    }
+
+    #[test]
+    fn close_account_frees_slot_and_returns_capital() {
+        let mut engine = RiskEngine::new(default_params());
+        let idx = engine.add_user(0).unwrap();
+
+        engine.deposit(idx, 3 * USDC_ONE, 1_000_000, 1).unwrap();
+        assert!(engine.is_used(idx as usize));
+        assert_eq!(engine.accounts[idx as usize].capital.get(), 3 * USDC_ONE);
+        let vault_before = engine.vault.get();
+
+        let released = engine.close_account(idx, 2, 1_000_000).unwrap();
+        assert_eq!(released, 3 * USDC_ONE);
+        assert!(!engine.is_used(idx as usize));
+        assert_eq!(engine.accounts[idx as usize].capital.get(), 0);
+        assert_eq!(engine.vault.get(), vault_before - 3 * USDC_ONE);
+    }
+
+    #[test]
+    fn reclaim_empty_account_sweeps_dust_to_insurance_and_frees_slot() {
+        let mut engine = RiskEngine::new(default_params());
+        let idx = engine.add_user(500_000).unwrap();
+        assert!(engine.is_used(idx as usize));
+        assert_eq!(engine.accounts[idx as usize].capital.get(), 500_000);
+
+        let ins_before = engine.insurance_fund.balance.get();
+        engine.reclaim_empty_account(idx).unwrap();
+        assert!(!engine.is_used(idx as usize));
+        assert_eq!(engine.accounts[idx as usize].capital.get(), 0);
+        assert_eq!(engine.insurance_fund.balance.get(), ins_before + 500_000);
+    }
+
+    #[test]
+    fn garbage_collect_dust_reclaims_multiple_accounts() {
+        let mut engine = RiskEngine::new(default_params());
+        let idx0 = engine.add_user(1).unwrap();
+        let idx1 = engine.add_user(2).unwrap();
+        assert!(engine.is_used(idx0 as usize));
+        assert!(engine.is_used(idx1 as usize));
+
+        let ins_before = engine.insurance_fund.balance.get();
+        let n = engine.garbage_collect_dust();
+        assert!(n >= 1);
+        assert!(!engine.is_used(idx0 as usize));
+        assert!(!engine.is_used(idx1 as usize));
+        assert_eq!(engine.insurance_fund.balance.get(), ins_before + 3);
     }
 }
 

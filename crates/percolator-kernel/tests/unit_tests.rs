@@ -201,12 +201,18 @@ fn test_withdraw_exceeds_balance() {
 fn test_withdraw_requires_fresh_crank() {
     let mut engine = RiskEngine::new(default_params());
     let oracle = 1000u64;
+    engine.current_slot = 1;
     let idx = engine.add_user(1000).expect("add_user");
     engine.deposit(idx, 10_000, oracle, 1).expect("deposit");
 
     // Advance far beyond staleness window without cranking
     let result = engine.withdraw(idx, 1_000, oracle, 5000);
     assert_eq!(result, Err(RiskError::Unauthorized));
+
+    // Keeperless/autocrank pattern: a minimal crank (no candidates) refreshes
+    // freshness gates and allows routine actions to proceed.
+    engine.keeper_crank(5000, oracle, &[], 0).expect("crank refresh");
+    engine.withdraw(idx, 1_000, oracle, 5000).expect("withdraw after refresh");
 }
 
 // ============================================================================
@@ -1546,6 +1552,30 @@ fn test_accrue_market_negative_funding_rate() {
         "negative rate: short K must decrease (payer)");
     assert!(engine.adl_coeff_long > k_long_before,
         "negative rate: long K must increase (receiver)");
+}
+
+#[test]
+fn test_set_funding_rate_clamps_to_max_abs() {
+    let mut engine = RiskEngine::new(default_params());
+    engine.set_funding_rate_for_next_interval(1_000_000);
+    assert_eq!(engine.funding_rate_bps_per_slot_last, MAX_ABS_FUNDING_BPS_PER_SLOT);
+    engine.set_funding_rate_for_next_interval(-1_000_000);
+    assert_eq!(engine.funding_rate_bps_per_slot_last, -MAX_ABS_FUNDING_BPS_PER_SLOT);
+}
+
+#[test]
+fn test_set_funding_rate_zero_is_noop_and_accrual_lives() {
+    let mut engine = RiskEngine::new(default_params());
+    let oracle = 1000u64;
+
+    // Initialize slots
+    engine.current_slot = 1;
+    engine.last_market_slot = 1;
+    engine.last_oracle_price = oracle;
+    engine.funding_price_sample_last = oracle;
+
+    engine.set_funding_rate_for_next_interval(0);
+    engine.accrue_market_to(10, oracle).expect("accrue ok");
 }
 
 // ============================================================================

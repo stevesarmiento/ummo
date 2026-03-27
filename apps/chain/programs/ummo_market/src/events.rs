@@ -149,3 +149,141 @@ pub struct LpWithdrawalClaimed {
     pub claimed_amount: u64,
     pub remaining_shares: u64,
 }
+
+#[event]
+pub struct CrankEvent {
+    pub market: Pubkey,
+    pub shard: Pubkey,
+    pub now_slot: u64,
+    pub last_crank_slot: u64,
+    pub advanced: bool,
+}
+
+#[event]
+pub struct RiskStateUpdated {
+    pub market: Pubkey,
+    pub shard: Pubkey,
+    pub now_slot: u64,
+    pub oracle_price: u64,
+    pub risk_price: u64,
+    pub ema_sym_price: u64,
+    pub ema_dir_down_price: u64,
+    pub ema_dir_up_price: u64,
+}
+
+#[event]
+pub struct FundingRateUpdated {
+    pub market: Pubkey,
+    pub shard: Pubkey,
+    pub now_slot: u64,
+    pub old_rate_bps_per_slot: i64,
+    pub new_rate_bps_per_slot: i64,
+    pub interval_slots: u64,
+}
+
+#[event]
+pub struct LiquidationEvent {
+    pub market: Pubkey,
+    pub shard: Pubkey,
+    pub keeper: Pubkey,
+    pub liquidatee_owner: Pubkey,
+    pub liquidatee_engine_index: u16,
+    pub liquidated: bool,
+    pub old_effective_pos_q: i64,
+    pub now_slot: u64,
+    pub oracle_price: u64,
+    pub oracle_posted_slot: u64,
+}
+
+#[event]
+pub struct LiquidationBountyPaid {
+    pub market: Pubkey,
+    pub shard: Pubkey,
+    pub keeper: Pubkey,
+    pub liquidatee_engine_index: u16,
+    pub bounty_paid: u64,
+    pub now_slot: u64,
+}
+
+#[event]
+pub struct RiskConfigUpdated {
+    pub market: Pubkey,
+    pub shard: Pubkey,
+    pub now_slot: u64,
+    pub sym_half_life_slots: u64,
+    pub dir_half_life_slots: u64,
+}
+
+#[event]
+pub struct RailsUpdated {
+    pub market: Pubkey,
+    pub shard: Pubkey,
+    pub now_slot: u64,
+    pub first_tier_max_notional: u64,
+    pub first_tier_max_oracle_deviation_bps: u16,
+    pub second_tier_max_notional: u64,
+    pub second_tier_max_oracle_deviation_bps: u16,
+    pub third_tier_max_notional: u64,
+    pub third_tier_max_oracle_deviation_bps: u16,
+}
+
+#[event]
+pub struct LiquidationConfigUpdated {
+    pub market: Pubkey,
+    pub shard: Pubkey,
+    pub now_slot: u64,
+    pub is_enabled: bool,
+    pub bounty_share_bps: u16,
+    pub bounty_cap_abs: u64,
+}
+
+#[event]
+pub struct FundingPaymentEvent {
+    pub market: Pubkey,
+    pub shard: Pubkey,
+    pub trader: Pubkey,
+    pub owner: Pubkey,
+    pub engine_index: u16,
+    pub now_slot: u64,
+    pub delta_funding_pnl: i64,
+    pub cumulative_funding_pnl: i64,
+}
+
+#[event]
+pub struct AccountClosed {
+    pub market: Pubkey,
+    pub shard: Pubkey,
+    pub owner: Pubkey,
+    pub engine_index: u16,
+    pub amount_returned: u64,
+    pub now_slot: u64,
+}
+
+#[event]
+pub struct TraderClosed {
+    pub market: Pubkey,
+    pub shard: Pubkey,
+    pub trader: Pubkey,
+    pub owner: Pubkey,
+    pub engine_index: u16,
+    pub amount_returned: u64,
+    pub now_slot: u64,
+}
+
+#[event]
+pub struct AccountReclaimed {
+    pub market: Pubkey,
+    pub shard: Pubkey,
+    pub engine_index: u16,
+    pub dust_swept: u64,
+    pub now_slot: u64,
+}
+
+#[event]
+pub struct DustGarbageCollected {
+    pub market: Pubkey,
+    pub shard: Pubkey,
+    pub num_closed: u32,
+    pub dust_swept: u64,
+    pub now_slot: u64,
+}

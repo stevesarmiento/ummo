@@ -94,6 +94,31 @@ interface LiquidationDoc {
   indexedAt: number
 }
 
+interface FundingPaymentDoc {
+  signature: string
+  slot: bigint
+  market: string
+  shard: string
+  owner: string
+  deltaFundingPnl: bigint
+  cumulativeFundingPnl: bigint
+  nowSlot: bigint
+  indexedAt: number
+}
+
+interface HousekeepingDoc {
+  signature: string
+  slot: bigint
+  market: string
+  shard: string
+  kind: "accountClosed" | "traderClosed" | "accountReclaimed" | "dustGarbageCollected"
+  trader?: string
+  engineIndex?: number
+  amountReturned?: bigint
+  nowSlot: bigint
+  indexedAt: number
+}
+
 function normalizeTradingConfig(
   market: string,
   config: TradingConfigDoc | null,
@@ -121,6 +146,8 @@ function mapActivity(args: {
   deposits: DepositDoc[]
   withdrawals: WithdrawalDoc[]
   liquidations: LiquidationDoc[]
+  fundingPayments: FundingPaymentDoc[]
+  housekeeping: HousekeepingDoc[]
 }) {
   const events = [
     ...args.trades.map((trade) => ({
@@ -155,7 +182,39 @@ function mapActivity(args: {
       indexedAt: liquidation.indexedAt,
       liquidated: liquidation.liquidated,
     })),
-  ]
+    ...args.fundingPayments.map((payment) => ({
+      type: "FundingPayment" as const,
+      signature: payment.signature,
+      slot: payment.slot.toString(10),
+      indexedAt: payment.indexedAt,
+      deltaFundingPnl: payment.deltaFundingPnl.toString(10),
+      cumulativeFundingPnl: payment.cumulativeFundingPnl.toString(10),
+    })),
+    ...args.housekeeping.flatMap((h): any[] => {
+      if (h.kind === "traderClosed")
+        return [
+          {
+            type: "TraderClosed" as const,
+            signature: h.signature,
+            slot: h.slot.toString(10),
+            indexedAt: h.indexedAt,
+            amountReturned: (h.amountReturned ?? 0n).toString(10),
+          },
+        ]
+      if (h.kind === "accountClosed")
+        return [
+          {
+            type: "AccountClosed" as const,
+            signature: h.signature,
+            slot: h.slot.toString(10),
+            indexedAt: h.indexedAt,
+            engineIndex: h.engineIndex ?? 0,
+            amountReturned: (h.amountReturned ?? 0n).toString(10),
+          },
+        ]
+      return []
+    }),
+  ] as Array<{ slot: string; indexedAt: number } & Record<string, unknown>>
 
   events.sort((left, right) => {
     const slotDiff = Number(BigInt(right.slot) - BigInt(left.slot))
@@ -173,7 +232,17 @@ export const getByOwnerMarketShard = queryGeneric({
     shard: v.string(),
   },
   handler: async (ctx, args) => {
-    const [configRow, traderRows, trades, deposits, withdrawals, liquidations, positionRows] =
+    const [
+      configRow,
+      traderRows,
+      trades,
+      deposits,
+      withdrawals,
+      liquidations,
+      fundingPayments,
+      housekeepingEvents,
+      positionRows,
+    ] =
       await Promise.all([
         ctx.db
           .query("marketTradingConfigs")
@@ -200,6 +269,14 @@ export const getByOwnerMarketShard = queryGeneric({
           .withIndex("by_owner", (q) => q.eq("liquidateeOwner", args.owner))
           .collect() as Promise<LiquidationDoc[]>,
         ctx.db
+          .query("fundingPayments")
+          .withIndex("by_owner", (q) => q.eq("owner", args.owner))
+          .collect() as Promise<FundingPaymentDoc[]>,
+        ctx.db
+          .query("housekeepingEvents")
+          .withIndex("by_owner", (q) => q.eq("owner", args.owner))
+          .collect() as Promise<HousekeepingDoc[]>,
+        ctx.db
           .query("positionsView")
           .withIndex("by_owner", (q) => q.eq("owner", args.owner))
           .collect() as Promise<PositionDoc[]>,
@@ -221,6 +298,12 @@ export const getByOwnerMarketShard = queryGeneric({
     )
     const filteredLiquidations = liquidations.filter(
       (liquidation) => liquidation.market === args.market && liquidation.shard === args.shard,
+    )
+    const filteredFundingPayments = fundingPayments.filter(
+      (payment) => payment.market === args.market && payment.shard === args.shard,
+    )
+    const filteredHousekeeping = housekeepingEvents.filter(
+      (event) => event.market === args.market && event.shard === args.shard,
     )
     const indexedPosition =
       positionRows.find(
@@ -244,6 +327,8 @@ export const getByOwnerMarketShard = queryGeneric({
       deposits: filteredDeposits,
       withdrawals: filteredWithdrawals,
       liquidations: filteredLiquidations,
+      fundingPayments: filteredFundingPayments,
+      housekeeping: filteredHousekeeping,
     })
 
     return {

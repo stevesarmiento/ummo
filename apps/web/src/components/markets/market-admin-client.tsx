@@ -38,6 +38,8 @@ import {
   getSetMatcherAuthorityInstruction,
   getSetLpBandConfigInstruction,
   getShardAddress,
+  getRailsAddress,
+  getRiskStateAddress,
   getTraderAddress,
 } from "@ummo/sdk"
 
@@ -458,13 +460,19 @@ export function MarketAdminClient(props: MarketAdminClientProps) {
     setIsSubmitting(true)
     try {
       const shard = await getShardAddress({ market: marketAddress, shardSeed })
-      const engine = await getEngineAddress({ shard })
+      const [engine, riskState, rails] = await Promise.all([
+        getEngineAddress({ shard }),
+        getRiskStateAddress({ shard }),
+        getRailsAddress({ shard }),
+      ])
       const ix = getInitShardInstruction({
         payer: ownerAddress,
         oracleFeed: oracleFeedAddress,
         market: marketAddress,
         shardSeed,
         shard,
+        riskState,
+        rails,
         engine,
         shardId,
       })
@@ -858,12 +866,18 @@ export function MarketAdminClient(props: MarketAdminClientProps) {
       })
       setHybridQuote(quote)
 
+      const [riskState, rails] = await Promise.all([
+        getRiskStateAddress({ shard: shardAddress }),
+        getRailsAddress({ shard: shardAddress }),
+      ])
       const ix = getExecuteTradeInstruction({
         owner: ownerAddress,
         matcher: address(props.matcherAuthority),
         oracleFeed: oracleFeedAddress,
         market: marketAddress,
         shard: shardAddress,
+        riskState,
+        rails,
         engine: address(derived.engine),
         lpPool: address(derived.lpPool!),
         trader: address(derived.trader),

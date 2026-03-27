@@ -8,7 +8,7 @@ import {
 } from "@solana/kit"
 
 export const UMMO_MARKET_PROGRAM_ID = address(
-  "Fk7Xs4araPKy6ijUSnaXBnmSV4k5FvUVRM3ukNJs9Bky",
+  "GB2SgmYPnk7d2SPJbA7EaGXwWA6uSkJZH2WxUJjBc8A5",
 )
 
 export const UMMO_MARKET_PROGRAM_ADDRESS = UMMO_MARKET_PROGRAM_ID
@@ -40,6 +40,13 @@ export const TRADER_SEED = "trader"
 export const LP_POOL_SEED = "lp_pool"
 export const LP_POSITION_SEED = "lp_position"
 export const LP_BAND_SEED = "lp_band"
+export const RISK_STATE_SEED = "risk_state"
+export const RAILS_SEED = "rails"
+export const FUNDING_STATE_SEED = "funding_state"
+export const MATCHER_ALLOWLIST_SEED = "matcher_allowlist"
+export const LIQUIDATION_CONFIG_SEED = "liquidation_config"
+export const FUNDING_ACCUMULATOR_SEED = "funding_accumulator"
+export const TRADER_FUNDING_STATE_SEED = "trader_funding_state"
 
 export const MAX_CRANK_STALENESS_SLOTS = 150n
 export const POSITION_SCALE_Q = 1_000_000n
@@ -87,6 +94,39 @@ const INIT_SHARD_DISCRIMINATOR = new Uint8Array([
 ])
 const SET_MATCHER_AUTHORITY_DISCRIMINATOR = new Uint8Array([
   5, 94, 51, 114, 0, 5, 95, 40,
+])
+const SET_MATCHER_ALLOWLIST_DISCRIMINATOR = new Uint8Array([
+  223, 108, 95, 154, 30, 124, 174, 60,
+])
+const SET_RISK_CONFIG_DISCRIMINATOR = new Uint8Array([
+  119, 66, 177, 45, 121, 221, 30, 45,
+])
+const SET_MARKET_RAILS_DISCRIMINATOR = new Uint8Array([
+  235, 129, 209, 6, 32, 71, 123, 121,
+])
+const SET_LIQUIDATION_CONFIG_DISCRIMINATOR = new Uint8Array([
+  117, 125, 3, 240, 238, 159, 124, 49,
+])
+const TOUCH_TRADER_FUNDING_DISCRIMINATOR = new Uint8Array([
+  217, 163, 115, 91, 157, 66, 43, 255,
+])
+const SYNC_TRADER_FUNDING_STATE_DISCRIMINATOR = new Uint8Array([
+  68, 5, 163, 247, 100, 30, 216, 149,
+])
+const SET_FUNDING_RATE_DISCRIMINATOR = new Uint8Array([
+  113, 127, 53, 135, 107, 37, 58, 65,
+])
+const CLOSE_ACCOUNT_DISCRIMINATOR = new Uint8Array([
+  125, 255, 149, 14, 110, 34, 72, 24,
+])
+const CLOSE_TRADER_DISCRIMINATOR = new Uint8Array([
+  26, 12, 56, 104, 212, 12, 186, 205,
+])
+const RECLAIM_EMPTY_ACCOUNT_DISCRIMINATOR = new Uint8Array([
+  126, 9, 242, 33, 58, 222, 8, 150,
+])
+const GARBAGE_COLLECT_DUST_DISCRIMINATOR = new Uint8Array([
+  11, 218, 6, 30, 44, 2, 156, 211,
 ])
 
 function u64le(value: bigint): Uint8Array {
@@ -136,6 +176,10 @@ function quoteBandBytes(args: {
   )
 }
 
+function railTierBytes(args: { maxNotional: bigint; maxOracleDeviationBps: number }): Uint8Array {
+  return concatBytes(u64le(args.maxNotional), u16le(args.maxOracleDeviationBps))
+}
+
 function concatBytes(...parts: Uint8Array[]): Uint8Array {
   const len = parts.reduce((sum, part) => sum + part.length, 0)
   const out = new Uint8Array(len)
@@ -178,6 +222,68 @@ export async function getEngineAddress(args: { shard: Address }): Promise<Addres
     seeds: [ENGINE_SEED, addressEncoder.encode(args.shard)],
   })
   return engine
+}
+
+export async function getRiskStateAddress(args: { shard: Address }): Promise<Address> {
+  const [riskState] = await getProgramDerivedAddress({
+    programAddress: UMMO_MARKET_PROGRAM_ADDRESS,
+    seeds: [RISK_STATE_SEED, addressEncoder.encode(args.shard)],
+  })
+  return riskState
+}
+
+export async function getRailsAddress(args: { shard: Address }): Promise<Address> {
+  const [rails] = await getProgramDerivedAddress({
+    programAddress: UMMO_MARKET_PROGRAM_ADDRESS,
+    seeds: [RAILS_SEED, addressEncoder.encode(args.shard)],
+  })
+  return rails
+}
+
+export async function getFundingStateAddress(args: { shard: Address }): Promise<Address> {
+  const [fundingState] = await getProgramDerivedAddress({
+    programAddress: UMMO_MARKET_PROGRAM_ADDRESS,
+    seeds: [FUNDING_STATE_SEED, addressEncoder.encode(args.shard)],
+  })
+  return fundingState
+}
+
+export async function getLiquidationConfigAddress(args: {
+  shard: Address
+}): Promise<Address> {
+  const [config] = await getProgramDerivedAddress({
+    programAddress: UMMO_MARKET_PROGRAM_ADDRESS,
+    seeds: [LIQUIDATION_CONFIG_SEED, addressEncoder.encode(args.shard)],
+  })
+  return config
+}
+
+export async function getFundingAccumulatorAddress(args: { shard: Address }): Promise<Address> {
+  const [acc] = await getProgramDerivedAddress({
+    programAddress: UMMO_MARKET_PROGRAM_ADDRESS,
+    seeds: [FUNDING_ACCUMULATOR_SEED, addressEncoder.encode(args.shard)],
+  })
+  return acc
+}
+
+export async function getTraderFundingStateAddress(args: {
+  trader: Address
+}): Promise<Address> {
+  const [state] = await getProgramDerivedAddress({
+    programAddress: UMMO_MARKET_PROGRAM_ADDRESS,
+    seeds: [TRADER_FUNDING_STATE_SEED, addressEncoder.encode(args.trader)],
+  })
+  return state
+}
+
+export async function getMatcherAllowlistAddress(args: {
+  market: Address
+}): Promise<Address> {
+  const [allowlist] = await getProgramDerivedAddress({
+    programAddress: UMMO_MARKET_PROGRAM_ADDRESS,
+    seeds: [MATCHER_ALLOWLIST_SEED, addressEncoder.encode(args.market)],
+  })
+  return allowlist
 }
 
 export async function getTraderAddress(args: {
@@ -360,6 +466,7 @@ export function getClaimLpWithdrawInstruction(args: {
   oracleFeed: Address
   market: Address
   shard: Address
+  riskState: Address
   engine: Address
   lpPool: Address
   lpPosition: Address
@@ -375,6 +482,7 @@ export function getClaimLpWithdrawInstruction(args: {
       { address: args.oracleFeed, role: AccountRole.READONLY },
       { address: args.market, role: AccountRole.READONLY },
       { address: args.shard, role: AccountRole.READONLY },
+      { address: args.riskState, role: AccountRole.WRITABLE },
       { address: args.engine, role: AccountRole.WRITABLE },
       { address: args.lpPool, role: AccountRole.WRITABLE },
       { address: args.lpPosition, role: AccountRole.WRITABLE },
@@ -448,6 +556,8 @@ export function getInitShardInstruction(args: {
   market: Address
   shardSeed: Address
   shard: Address
+  riskState: Address
+  rails: Address
   engine: Address
   shardId: number
 }): Instruction {
@@ -463,6 +573,8 @@ export function getInitShardInstruction(args: {
       { address: args.market, role: AccountRole.READONLY },
       { address: args.shardSeed, role: AccountRole.READONLY },
       { address: args.shard, role: AccountRole.WRITABLE },
+      { address: args.riskState, role: AccountRole.WRITABLE },
+      { address: args.rails, role: AccountRole.WRITABLE },
       { address: args.engine, role: AccountRole.WRITABLE },
       { address: SYSTEM_PROGRAM_ADDRESS, role: AccountRole.READONLY },
     ],
@@ -485,6 +597,219 @@ export function getSetMatcherAuthorityInstruction(args: {
       { address: args.oracleFeed, role: AccountRole.READONLY },
       { address: args.market, role: AccountRole.WRITABLE },
       { address: args.newMatcherAuthority, role: AccountRole.READONLY },
+    ],
+    data,
+  }
+}
+
+export function getSetMatcherAllowlistInstruction(args: {
+  authority: Address
+  oracleFeed: Address
+  market: Address
+  matcherAllowlist: Address
+  isEnabled: boolean
+  matchers: Address[]
+}): Instruction {
+  if (args.matchers.length > 8) throw new Error("matchers exceeds 8")
+
+  const matchersBytes = concatBytes(
+    ...args.matchers.map((m) => new Uint8Array(addressEncoder.encode(m))),
+  )
+  const data = concatBytes(
+    SET_MATCHER_ALLOWLIST_DISCRIMINATOR,
+    new Uint8Array([args.isEnabled ? 1 : 0]),
+    u32le(args.matchers.length),
+    matchersBytes,
+  )
+
+  return {
+    programAddress: UMMO_MARKET_PROGRAM_ADDRESS,
+    accounts: [
+      { address: args.authority, role: AccountRole.WRITABLE_SIGNER },
+      { address: args.oracleFeed, role: AccountRole.READONLY },
+      { address: args.market, role: AccountRole.READONLY },
+      { address: args.matcherAllowlist, role: AccountRole.WRITABLE },
+      { address: SYSTEM_PROGRAM_ADDRESS, role: AccountRole.READONLY },
+    ],
+    data,
+  }
+}
+
+export function getSetRiskConfigInstruction(args: {
+  authority: Address
+  oracleFeed: Address
+  market: Address
+  shard: Address
+  riskState: Address
+  symHalfLifeSlots: bigint
+  dirHalfLifeSlots: bigint
+}): Instruction {
+  const data = concatBytes(
+    SET_RISK_CONFIG_DISCRIMINATOR,
+    u64le(args.symHalfLifeSlots),
+    u64le(args.dirHalfLifeSlots),
+  )
+
+  return {
+    programAddress: UMMO_MARKET_PROGRAM_ADDRESS,
+    accounts: [
+      { address: args.authority, role: AccountRole.WRITABLE_SIGNER },
+      { address: args.oracleFeed, role: AccountRole.READONLY },
+      { address: args.market, role: AccountRole.READONLY },
+      { address: args.shard, role: AccountRole.READONLY },
+      { address: args.riskState, role: AccountRole.WRITABLE },
+      { address: CLOCK_SYSVAR_ADDRESS, role: AccountRole.READONLY },
+    ],
+    data,
+  }
+}
+
+export function getSetMarketRailsInstruction(args: {
+  authority: Address
+  oracleFeed: Address
+  market: Address
+  shard: Address
+  rails: Address
+  tiers: Array<{ maxNotional: bigint; maxOracleDeviationBps: number }>
+}): Instruction {
+  if (args.tiers.length !== 3) throw new Error("tiers must contain exactly 3 items")
+
+  const tiersBytes = args.tiers.map((tier) => railTierBytes(tier))
+  const data = concatBytes(SET_MARKET_RAILS_DISCRIMINATOR, ...tiersBytes)
+
+  return {
+    programAddress: UMMO_MARKET_PROGRAM_ADDRESS,
+    accounts: [
+      { address: args.authority, role: AccountRole.WRITABLE_SIGNER },
+      { address: args.oracleFeed, role: AccountRole.READONLY },
+      { address: args.market, role: AccountRole.READONLY },
+      { address: args.shard, role: AccountRole.READONLY },
+      { address: args.rails, role: AccountRole.WRITABLE },
+      { address: CLOCK_SYSVAR_ADDRESS, role: AccountRole.READONLY },
+    ],
+    data,
+  }
+}
+
+export function getSetLiquidationConfigInstruction(args: {
+  authority: Address
+  oracleFeed: Address
+  market: Address
+  shard: Address
+  liquidationConfig: Address
+  isEnabled: boolean
+  bountyShareBps: number
+  bountyCapAbs: bigint
+}): Instruction {
+  if (args.bountyShareBps < 0 || args.bountyShareBps > 10_000)
+    throw new Error("bountyShareBps out of range")
+
+  const data = concatBytes(
+    SET_LIQUIDATION_CONFIG_DISCRIMINATOR,
+    new Uint8Array([args.isEnabled ? 1 : 0]),
+    u16le(args.bountyShareBps),
+    u64le(args.bountyCapAbs),
+  )
+
+  return {
+    programAddress: UMMO_MARKET_PROGRAM_ADDRESS,
+    accounts: [
+      { address: args.authority, role: AccountRole.WRITABLE_SIGNER },
+      { address: args.oracleFeed, role: AccountRole.READONLY },
+      { address: args.market, role: AccountRole.READONLY },
+      { address: args.shard, role: AccountRole.READONLY },
+      { address: args.liquidationConfig, role: AccountRole.WRITABLE },
+      { address: SYSTEM_PROGRAM_ADDRESS, role: AccountRole.READONLY },
+      { address: CLOCK_SYSVAR_ADDRESS, role: AccountRole.READONLY },
+    ],
+    data,
+  }
+}
+
+export function getTouchTraderFundingInstruction(args: {
+  signer: Address
+  oracleFeed: Address
+  market: Address
+  shard: Address
+  riskState: Address
+  trader: Address
+  engine: Address
+  fundingAccumulator: Address
+  traderFundingState: Address
+}): Instruction {
+  const data = TOUCH_TRADER_FUNDING_DISCRIMINATOR
+
+  return {
+    programAddress: UMMO_MARKET_PROGRAM_ADDRESS,
+    accounts: [
+      { address: args.signer, role: AccountRole.WRITABLE_SIGNER },
+      { address: args.oracleFeed, role: AccountRole.READONLY },
+      { address: args.market, role: AccountRole.READONLY },
+      { address: args.shard, role: AccountRole.READONLY },
+      { address: args.riskState, role: AccountRole.WRITABLE },
+      { address: args.trader, role: AccountRole.READONLY },
+      { address: args.engine, role: AccountRole.WRITABLE },
+      { address: args.fundingAccumulator, role: AccountRole.WRITABLE },
+      { address: args.traderFundingState, role: AccountRole.WRITABLE },
+      { address: SYSTEM_PROGRAM_ADDRESS, role: AccountRole.READONLY },
+      { address: CLOCK_SYSVAR_ADDRESS, role: AccountRole.READONLY },
+    ],
+    data,
+  }
+}
+
+export function getSyncTraderFundingStateInstruction(args: {
+  signer: Address
+  oracleFeed: Address
+  market: Address
+  shard: Address
+  trader: Address
+  fundingAccumulator: Address
+  traderFundingState: Address
+}): Instruction {
+  const data = SYNC_TRADER_FUNDING_STATE_DISCRIMINATOR
+
+  return {
+    programAddress: UMMO_MARKET_PROGRAM_ADDRESS,
+    accounts: [
+      { address: args.signer, role: AccountRole.WRITABLE_SIGNER },
+      { address: args.oracleFeed, role: AccountRole.READONLY },
+      { address: args.market, role: AccountRole.READONLY },
+      { address: args.shard, role: AccountRole.READONLY },
+      { address: args.trader, role: AccountRole.READONLY },
+      { address: args.fundingAccumulator, role: AccountRole.WRITABLE },
+      { address: args.traderFundingState, role: AccountRole.WRITABLE },
+      { address: CLOCK_SYSVAR_ADDRESS, role: AccountRole.READONLY },
+    ],
+    data,
+  }
+}
+
+export function getSetFundingRateInstruction(args: {
+  signer: Address
+  oracleFeed: Address
+  market: Address
+  shard: Address
+  fundingState: Address
+  engine: Address
+  newRateBpsPerSlot: bigint
+}): Instruction {
+  const data = concatBytes(
+    SET_FUNDING_RATE_DISCRIMINATOR,
+    i64le(args.newRateBpsPerSlot),
+  )
+
+  return {
+    programAddress: UMMO_MARKET_PROGRAM_ADDRESS,
+    accounts: [
+      { address: args.signer, role: AccountRole.WRITABLE_SIGNER },
+      { address: args.oracleFeed, role: AccountRole.READONLY },
+      { address: args.market, role: AccountRole.READONLY },
+      { address: args.shard, role: AccountRole.READONLY },
+      { address: args.fundingState, role: AccountRole.WRITABLE },
+      { address: args.engine, role: AccountRole.WRITABLE },
+      { address: SYSTEM_PROGRAM_ADDRESS, role: AccountRole.READONLY },
+      { address: CLOCK_SYSVAR_ADDRESS, role: AccountRole.READONLY },
     ],
     data,
   }
@@ -529,6 +854,7 @@ export function getWithdrawInstruction(args: {
   oracleFeed: Address
   market: Address
   shard: Address
+  riskState: Address
   engine: Address
   trader: Address
   collateralMint: Address
@@ -546,6 +872,7 @@ export function getWithdrawInstruction(args: {
       { address: args.oracleFeed, role: AccountRole.READONLY },
       { address: args.market, role: AccountRole.READONLY },
       { address: args.shard, role: AccountRole.READONLY },
+      { address: args.riskState, role: AccountRole.WRITABLE },
       { address: args.engine, role: AccountRole.WRITABLE },
       { address: args.trader, role: AccountRole.READONLY },
       { address: args.collateralMint, role: AccountRole.READONLY },
@@ -558,15 +885,140 @@ export function getWithdrawInstruction(args: {
   }
 }
 
+export function getCloseAccountInstruction(args: {
+  owner: Address
+  oracleFeed: Address
+  market: Address
+  shard: Address
+  riskState: Address
+  engine: Address
+  collateralMint: Address
+  userCollateral: Address
+  vaultCollateral: Address
+  tokenProgram: Address
+  engineIndex: number
+}): Instruction {
+  if (args.engineIndex < 0 || args.engineIndex > 65_535)
+    throw new Error("engineIndex out of range")
+
+  const data = concatBytes(CLOSE_ACCOUNT_DISCRIMINATOR, u16le(args.engineIndex))
+
+  return {
+    programAddress: UMMO_MARKET_PROGRAM_ADDRESS,
+    accounts: [
+      { address: args.owner, role: AccountRole.READONLY_SIGNER },
+      { address: args.oracleFeed, role: AccountRole.READONLY },
+      { address: args.market, role: AccountRole.READONLY },
+      { address: args.shard, role: AccountRole.READONLY },
+      { address: args.riskState, role: AccountRole.WRITABLE },
+      { address: args.engine, role: AccountRole.WRITABLE },
+      { address: args.collateralMint, role: AccountRole.READONLY },
+      { address: args.userCollateral, role: AccountRole.WRITABLE },
+      { address: args.vaultCollateral, role: AccountRole.WRITABLE },
+      { address: args.tokenProgram, role: AccountRole.READONLY },
+      { address: CLOCK_SYSVAR_ADDRESS, role: AccountRole.READONLY },
+    ],
+    data,
+  }
+}
+
+export function getCloseTraderInstruction(args: {
+  owner: Address
+  oracleFeed: Address
+  market: Address
+  shard: Address
+  riskState: Address
+  engine: Address
+  trader: Address
+  collateralMint: Address
+  userCollateral: Address
+  vaultCollateral: Address
+  tokenProgram: Address
+}): Instruction {
+  const data = CLOSE_TRADER_DISCRIMINATOR
+
+  return {
+    programAddress: UMMO_MARKET_PROGRAM_ADDRESS,
+    accounts: [
+      { address: args.owner, role: AccountRole.WRITABLE_SIGNER },
+      { address: args.oracleFeed, role: AccountRole.READONLY },
+      { address: args.market, role: AccountRole.READONLY },
+      { address: args.shard, role: AccountRole.READONLY },
+      { address: args.riskState, role: AccountRole.WRITABLE },
+      { address: args.engine, role: AccountRole.WRITABLE },
+      { address: args.trader, role: AccountRole.WRITABLE },
+      { address: args.collateralMint, role: AccountRole.READONLY },
+      { address: args.userCollateral, role: AccountRole.WRITABLE },
+      { address: args.vaultCollateral, role: AccountRole.WRITABLE },
+      { address: args.tokenProgram, role: AccountRole.READONLY },
+      { address: CLOCK_SYSVAR_ADDRESS, role: AccountRole.READONLY },
+    ],
+    data,
+  }
+}
+
+export function getReclaimEmptyAccountInstruction(args: {
+  payer: Address
+  oracleFeed: Address
+  market: Address
+  shard: Address
+  engine: Address
+  engineIndex: number
+}): Instruction {
+  if (args.engineIndex < 0 || args.engineIndex > 65_535)
+    throw new Error("engineIndex out of range")
+
+  const data = concatBytes(RECLAIM_EMPTY_ACCOUNT_DISCRIMINATOR, u16le(args.engineIndex))
+
+  return {
+    programAddress: UMMO_MARKET_PROGRAM_ADDRESS,
+    accounts: [
+      { address: args.payer, role: AccountRole.WRITABLE_SIGNER },
+      { address: args.oracleFeed, role: AccountRole.READONLY },
+      { address: args.market, role: AccountRole.READONLY },
+      { address: args.shard, role: AccountRole.READONLY },
+      { address: args.engine, role: AccountRole.WRITABLE },
+      { address: CLOCK_SYSVAR_ADDRESS, role: AccountRole.READONLY },
+    ],
+    data,
+  }
+}
+
+export function getGarbageCollectDustInstruction(args: {
+  payer: Address
+  oracleFeed: Address
+  market: Address
+  shard: Address
+  engine: Address
+}): Instruction {
+  const data = GARBAGE_COLLECT_DUST_DISCRIMINATOR
+
+  return {
+    programAddress: UMMO_MARKET_PROGRAM_ADDRESS,
+    accounts: [
+      { address: args.payer, role: AccountRole.WRITABLE_SIGNER },
+      { address: args.oracleFeed, role: AccountRole.READONLY },
+      { address: args.market, role: AccountRole.READONLY },
+      { address: args.shard, role: AccountRole.READONLY },
+      { address: args.engine, role: AccountRole.WRITABLE },
+      { address: CLOCK_SYSVAR_ADDRESS, role: AccountRole.READONLY },
+    ],
+    data,
+  }
+}
+
 export function getExecuteTradeInstruction(args: {
   owner: Address
   matcher: Address
   oracleFeed: Address
   market: Address
   shard: Address
+  riskState: Address
+  rails: Address
   engine: Address
   lpPool: Address
   trader: Address
+  matcherAllowlist?: Address
   execPrice: bigint
   sizeQ: bigint
 }): Instruction {
@@ -584,10 +1036,15 @@ export function getExecuteTradeInstruction(args: {
       { address: args.oracleFeed, role: AccountRole.READONLY },
       { address: args.market, role: AccountRole.READONLY },
       { address: args.shard, role: AccountRole.READONLY },
+      { address: args.riskState, role: AccountRole.WRITABLE },
+      { address: args.rails, role: AccountRole.READONLY },
       { address: args.engine, role: AccountRole.WRITABLE },
       { address: args.lpPool, role: AccountRole.WRITABLE },
       { address: args.trader, role: AccountRole.READONLY },
       { address: CLOCK_SYSVAR_ADDRESS, role: AccountRole.READONLY },
+      ...(args.matcherAllowlist
+        ? [{ address: args.matcherAllowlist, role: AccountRole.READONLY as const }]
+        : []),
     ],
     data,
   }
@@ -599,6 +1056,7 @@ export function getKeeperCrankInstruction(args: {
   market: Address
   shard: Address
   engine: Address
+  riskState?: Address
   nowSlot: bigint
   oraclePrice: bigint
   orderedCandidates: number[]
@@ -631,6 +1089,9 @@ export function getKeeperCrankInstruction(args: {
       { address: args.market, role: AccountRole.READONLY },
       { address: args.shard, role: AccountRole.WRITABLE },
       { address: args.engine, role: AccountRole.WRITABLE },
+      ...(args.riskState
+        ? [{ address: args.riskState, role: AccountRole.WRITABLE as const }]
+        : []),
     ],
     data,
   }
@@ -641,7 +1102,13 @@ export function getLiquidateAtOracleInstruction(args: {
   oracleFeed: Address
   market: Address
   shard: Address
+  riskState: Address
   engine: Address
+  liquidationConfig?: Address
+  collateralMint: Address
+  keeperCollateral: Address
+  vaultCollateral: Address
+  tokenProgram: Address
   liquidateeEngineIndex: number
 }): Instruction {
   if (args.liquidateeEngineIndex < 0 || args.liquidateeEngineIndex > 65_535)
@@ -659,7 +1126,16 @@ export function getLiquidateAtOracleInstruction(args: {
       { address: args.oracleFeed, role: AccountRole.READONLY },
       { address: args.market, role: AccountRole.READONLY },
       { address: args.shard, role: AccountRole.READONLY },
+      { address: args.riskState, role: AccountRole.WRITABLE },
       { address: args.engine, role: AccountRole.WRITABLE },
+      ...(args.liquidationConfig
+        ? [{ address: args.liquidationConfig, role: AccountRole.READONLY as const }]
+        : []),
+      { address: args.collateralMint, role: AccountRole.READONLY },
+      { address: args.keeperCollateral, role: AccountRole.WRITABLE },
+      { address: args.vaultCollateral, role: AccountRole.WRITABLE },
+      { address: args.tokenProgram, role: AccountRole.READONLY },
+      { address: CLOCK_SYSVAR_ADDRESS, role: AccountRole.READONLY },
     ],
     data,
   }

@@ -23,6 +23,8 @@ const ENGINE_SEED = Buffer.from("engine");
 const LP_BAND_SEED = Buffer.from("lp_band");
 const LP_POOL_SEED = Buffer.from("lp_pool");
 const MARKET_SEED = Buffer.from("market");
+const RAILS_SEED = Buffer.from("rails");
+const RISK_STATE_SEED = Buffer.from("risk_state");
 const SHARD_SEED = Buffer.from("shard");
 const TRADER_SEED = Buffer.from("trader");
 const USDC_ONE = new BN(1_000_000);
@@ -56,6 +58,14 @@ describe("ummo_market", () => {
     );
     const engine = derivePda(
       [ENGINE_SEED, shard.toBuffer()],
+      program.programId
+    );
+    const riskState = derivePda(
+      [RISK_STATE_SEED, shard.toBuffer()],
+      program.programId
+    );
+    const rails = derivePda(
+      [RAILS_SEED, shard.toBuffer()],
       program.programId
     );
     const trader = derivePda(
@@ -134,6 +144,8 @@ describe("ummo_market", () => {
         market,
         shardSeed,
         shard,
+        riskState,
+        rails,
         engine,
         systemProgram: SystemProgram.programId,
       })

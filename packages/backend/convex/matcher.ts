@@ -12,7 +12,7 @@ import { getOraclePrice1e6FromPriceUpdateV2Bytes } from "./lib/pyth_receiver"
 // Keep backend invariants aligned with the on-chain program.
 // See `apps/chain/programs/ummo_market/src/constants.rs`.
 const MAX_CRANK_STALENESS_SLOTS = 150n
-const MAX_ORACLE_STALENESS_SLOTS = 150n
+const MAX_ORACLE_STALENESS_SLOTS = 10_000n
 const MAX_ORACLE_CONFIDENCE_BPS = 200n
 
 // Extra buffer so the oracle stays fresh through wallet approval + simulation.

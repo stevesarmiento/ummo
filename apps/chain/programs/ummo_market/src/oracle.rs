@@ -61,6 +61,13 @@ pub fn get_oracle_price_1e6(account: &UncheckedAccount, now_slot: u64) -> Result
     );
 
     require!(now_slot >= posted_slot, UmmoError::OracleStale);
+    msg!(
+        "oracle: now_slot={} posted_slot={} staleness_slots={} max_staleness_slots={}",
+        now_slot,
+        posted_slot,
+        now_slot - posted_slot,
+        MAX_ORACLE_STALENESS_SLOTS
+    );
     require!(now_slot - posted_slot <= MAX_ORACLE_STALENESS_SLOTS, UmmoError::OracleStale);
     require!(price > 0, UmmoError::OracleInvalidPrice);
 
@@ -133,7 +140,8 @@ mod tests {
         );
         let oracle_account = UncheckedAccount::try_from(&account_info);
 
-        let error = get_oracle_price_1e6(&oracle_account, 200).unwrap_err();
+        let now_slot = MAX_ORACLE_STALENESS_SLOTS.saturating_add(11);
+        let error = get_oracle_price_1e6(&oracle_account, now_slot).unwrap_err();
         assert!(error.to_string().contains("Oracle is stale"));
     }
 }

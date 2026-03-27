@@ -25,14 +25,25 @@ import {
   getDepositInstruction,
   getEngineAddress,
   getExecuteTradeInstruction,
+  getFundingStateAddress,
+  getFundingAccumulatorAddress,
   getKeeperCrankInstruction,
   getInitShardInstruction,
+  getLiquidationConfigAddress,
   getLpPoolAddress,
   getLiquidateAtOracleInstruction,
   getOpenTraderInstruction,
+  getRailsAddress,
+  getRiskStateAddress,
   getShardAddress,
+  getSetLiquidationConfigInstruction,
+  getSetMarketRailsInstruction,
+  getSetFundingRateInstruction,
   getSetMatcherAuthorityInstruction,
+  getSetRiskConfigInstruction,
+  getTouchTraderFundingInstruction,
   getTraderAddress,
+  getTraderFundingStateAddress,
   getWithdrawInstruction,
   MAX_CRANK_STALENESS_SLOTS,
   POSITION_SCALE_Q,
@@ -85,11 +96,12 @@ interface LiquidationDoc {
   nowSlot: unknown
   oraclePrice: unknown
   oraclePostedSlot: unknown
+  bountyPaid?: unknown
   indexedAt: number
 }
 
 interface ActivityEventBase {
-  type: "Deposit" | "Withdrawal" | "TradeExecuted" | "Liquidation"
+  type: "Deposit" | "Withdrawal" | "TradeExecuted" | "Liquidation" | "FundingPayment"
   signature: string
   slot: unknown
   market: string
@@ -122,11 +134,19 @@ interface LiquidationActivityEvent extends ActivityEventBase {
   nowSlot: unknown
 }
 
+interface FundingPaymentActivityEvent extends ActivityEventBase {
+  type: "FundingPayment"
+  deltaFundingPnl: unknown
+  cumulativeFundingPnl: unknown
+  nowSlot: unknown
+}
+
 type ActivityEvent =
   | DepositActivityEvent
   | WithdrawalActivityEvent
   | TradeActivityEvent
   | LiquidationActivityEvent
+  | FundingPaymentActivityEvent
 
 export interface MarketClientProps {
   market: string
@@ -240,6 +260,61 @@ export function MarketClient(props: MarketClientProps) {
     const initial = toBigInt(props.lastCrankSlot)
     return initial ?? 0n
   })
+  const [fundingUpdatedAtSlot, setFundingUpdatedAtSlot] = useState<bigint | null>(
+    null,
+  )
+  const [fundingRateBpsPerSlot, setFundingRateBpsPerSlot] = useState<bigint | null>(
+    null,
+  )
+  const [fundingRateInput, setFundingRateInput] = useState("0")
+  const [fundingSuggestion, setFundingSuggestion] = useState<{
+    tradeCount: number
+    totalNotional: unknown
+    weightedPremiumBps: unknown
+    suggestedRateBpsPerSlot: unknown
+    intervalStartSlot: unknown
+    intervalEndSlot: unknown
+  } | null>(null)
+  const [fundingHistory, setFundingHistory] = useState<
+    Array<{
+      signature: string
+      nowSlot: unknown
+      newRateBpsPerSlot: unknown
+      indexedAt: number
+    }>
+  >([])
+
+  const [riskSymHalfLifeSlots, setRiskSymHalfLifeSlots] = useState<bigint | null>(null)
+  const [riskDirHalfLifeSlots, setRiskDirHalfLifeSlots] = useState<bigint | null>(null)
+  const [riskSymHalfLifeInput, setRiskSymHalfLifeInput] = useState("")
+  const [riskDirHalfLifeInput, setRiskDirHalfLifeInput] = useState("")
+
+  const [railsFirstTierMaxNotional, setRailsFirstTierMaxNotional] = useState<bigint | null>(null)
+  const [railsFirstTierMaxOracleDeviationBps, setRailsFirstTierMaxOracleDeviationBps] = useState<
+    number | null
+  >(null)
+  const [railsSecondTierMaxNotional, setRailsSecondTierMaxNotional] = useState<bigint | null>(null)
+  const [railsSecondTierMaxOracleDeviationBps, setRailsSecondTierMaxOracleDeviationBps] = useState<
+    number | null
+  >(null)
+  const [railsThirdTierMaxNotional, setRailsThirdTierMaxNotional] = useState<bigint | null>(null)
+  const [railsThirdTierMaxOracleDeviationBps, setRailsThirdTierMaxOracleDeviationBps] = useState<
+    number | null
+  >(null)
+
+  const [railsTier1NotionalInput, setRailsTier1NotionalInput] = useState("")
+  const [railsTier1DevBpsInput, setRailsTier1DevBpsInput] = useState("")
+  const [railsTier2NotionalInput, setRailsTier2NotionalInput] = useState("")
+  const [railsTier2DevBpsInput, setRailsTier2DevBpsInput] = useState("")
+  const [railsTier3NotionalInput, setRailsTier3NotionalInput] = useState("")
+  const [railsTier3DevBpsInput, setRailsTier3DevBpsInput] = useState("")
+
+  const [liquidationBountyIsEnabled, setLiquidationBountyIsEnabled] = useState<boolean | null>(null)
+  const [liquidationBountyShareBps, setLiquidationBountyShareBps] = useState<number | null>(null)
+  const [liquidationBountyCapAbs, setLiquidationBountyCapAbs] = useState<bigint | null>(null)
+  const [liquidationBountyIsEnabledInput, setLiquidationBountyIsEnabledInput] = useState(true)
+  const [liquidationBountyShareBpsInput, setLiquidationBountyShareBpsInput] = useState("")
+  const [liquidationBountyCapUsdcInput, setLiquidationBountyCapUsdcInput] = useState("")
 
   useEffect(() => {
     setLastCrankSlot(toBigInt(props.lastCrankSlot) ?? 0n)
@@ -327,12 +402,110 @@ export function MarketClient(props: MarketClientProps) {
   }, [client])
 
   const refreshShard = useCallback(async () => {
-    const doc = await convexQuery<{ lastCrankSlot: unknown } | null>(
+    const doc = await convexQuery<{
+      lastCrankSlot: unknown
+      fundingUpdatedAtSlot?: unknown
+      fundingRateBpsPerSlot?: unknown
+      riskSymHalfLifeSlots?: unknown
+      riskDirHalfLifeSlots?: unknown
+      railsFirstTierMaxNotional?: unknown
+      railsFirstTierMaxOracleDeviationBps?: unknown
+      railsSecondTierMaxNotional?: unknown
+      railsSecondTierMaxOracleDeviationBps?: unknown
+      railsThirdTierMaxNotional?: unknown
+      railsThirdTierMaxOracleDeviationBps?: unknown
+      liquidationBountyIsEnabled?: unknown
+      liquidationBountyShareBps?: unknown
+      liquidationBountyCapAbs?: unknown
+    } | null>(
       "shards:getByShard",
       { shard: shardAddress },
     )
     if (!doc) return
     setLastCrankSlot(toBigInt(doc.lastCrankSlot) ?? 0n)
+    setFundingUpdatedAtSlot(toBigInt(doc.fundingUpdatedAtSlot) ?? null)
+    setFundingRateBpsPerSlot(toBigInt(doc.fundingRateBpsPerSlot) ?? null)
+
+    const symHalfLife = toBigInt(doc.riskSymHalfLifeSlots) ?? null
+    const dirHalfLife = toBigInt(doc.riskDirHalfLifeSlots) ?? null
+    setRiskSymHalfLifeSlots(symHalfLife)
+    setRiskDirHalfLifeSlots(dirHalfLife)
+    if (symHalfLife != null && !riskSymHalfLifeInput) setRiskSymHalfLifeInput(symHalfLife.toString(10))
+    if (dirHalfLife != null && !riskDirHalfLifeInput) setRiskDirHalfLifeInput(dirHalfLife.toString(10))
+
+    const tier1Notional = toBigInt(doc.railsFirstTierMaxNotional) ?? null
+    const tier2Notional = toBigInt(doc.railsSecondTierMaxNotional) ?? null
+    const tier3Notional = toBigInt(doc.railsThirdTierMaxNotional) ?? null
+    const tier1Dev =
+      typeof doc.railsFirstTierMaxOracleDeviationBps === "number"
+        ? doc.railsFirstTierMaxOracleDeviationBps
+        : null
+    const tier2Dev =
+      typeof doc.railsSecondTierMaxOracleDeviationBps === "number"
+        ? doc.railsSecondTierMaxOracleDeviationBps
+        : null
+    const tier3Dev =
+      typeof doc.railsThirdTierMaxOracleDeviationBps === "number"
+        ? doc.railsThirdTierMaxOracleDeviationBps
+        : null
+
+    setRailsFirstTierMaxNotional(tier1Notional)
+    setRailsSecondTierMaxNotional(tier2Notional)
+    setRailsThirdTierMaxNotional(tier3Notional)
+    setRailsFirstTierMaxOracleDeviationBps(tier1Dev)
+    setRailsSecondTierMaxOracleDeviationBps(tier2Dev)
+    setRailsThirdTierMaxOracleDeviationBps(tier3Dev)
+
+    if (tier1Notional != null && !railsTier1NotionalInput)
+      setRailsTier1NotionalInput(formatFixedDecimal(tier1Notional, 6))
+    if (tier2Notional != null && !railsTier2NotionalInput)
+      setRailsTier2NotionalInput(formatFixedDecimal(tier2Notional, 6))
+    if (tier3Notional != null && !railsTier3NotionalInput)
+      setRailsTier3NotionalInput(formatFixedDecimal(tier3Notional, 6))
+    if (tier1Dev != null && !railsTier1DevBpsInput) setRailsTier1DevBpsInput(String(tier1Dev))
+    if (tier2Dev != null && !railsTier2DevBpsInput) setRailsTier2DevBpsInput(String(tier2Dev))
+    if (tier3Dev != null && !railsTier3DevBpsInput) setRailsTier3DevBpsInput(String(tier3Dev))
+
+    const bountyEnabled = typeof doc.liquidationBountyIsEnabled === "boolean" ? doc.liquidationBountyIsEnabled : null
+    const bountyShare =
+      typeof doc.liquidationBountyShareBps === "number" ? doc.liquidationBountyShareBps : null
+    const bountyCap = toBigInt(doc.liquidationBountyCapAbs) ?? null
+
+    setLiquidationBountyIsEnabled(bountyEnabled)
+    setLiquidationBountyShareBps(bountyShare)
+    setLiquidationBountyCapAbs(bountyCap)
+    if (bountyEnabled != null) setLiquidationBountyIsEnabledInput(bountyEnabled)
+    if (bountyShare != null && !liquidationBountyShareBpsInput)
+      setLiquidationBountyShareBpsInput(String(bountyShare))
+    if (bountyCap != null && !liquidationBountyCapUsdcInput)
+      setLiquidationBountyCapUsdcInput(formatFixedDecimal(bountyCap, 6))
+  }, [
+    liquidationBountyCapUsdcInput,
+    liquidationBountyShareBpsInput,
+    railsTier1DevBpsInput,
+    railsTier1NotionalInput,
+    railsTier2DevBpsInput,
+    railsTier2NotionalInput,
+    railsTier3DevBpsInput,
+    railsTier3NotionalInput,
+    riskDirHalfLifeInput,
+    riskSymHalfLifeInput,
+    shardAddress,
+  ])
+
+  const refreshFundingHistory = useCallback(async () => {
+    const rows = await convexQuery<
+      Array<{
+        signature: string
+        nowSlot: unknown
+        newRateBpsPerSlot: unknown
+        indexedAt: number
+      }>
+    >("fundingUpdates:listByShard", {
+      shard: shardAddress,
+      limit: 10,
+    })
+    setFundingHistory(rows)
   }, [shardAddress])
 
   useEffect(() => {
@@ -342,11 +515,13 @@ export function MarketClient(props: MarketClientProps) {
     void refreshActivity()
     void refreshSlot()
     void refreshShard()
+    void refreshFundingHistory()
   }, [
     refresh,
     refreshActivity,
     refreshLiquidations,
     refreshPositions,
+    refreshFundingHistory,
     refreshShard,
     refreshSlot,
   ])
@@ -465,7 +640,10 @@ export function MarketClient(props: MarketClientProps) {
 
     setIsSubmitting(true)
     try {
-      const engine = await getEngineAddress({ shard: shardAddress })
+      const [engine, riskState] = await Promise.all([
+        getEngineAddress({ shard: shardAddress }),
+        getRiskStateAddress({ shard: shardAddress }),
+      ])
       const quote = await convexAction<{ oraclePrice: string }>("matcher:getQuote", {
         oracleFeed: oracleFeedAddress,
       })
@@ -476,6 +654,7 @@ export function MarketClient(props: MarketClientProps) {
         oracleFeed: oracleFeedAddress,
         market: marketAddress,
         shard: shardAddress,
+        riskState,
         engine,
         nowSlot: 0n,
         oraclePrice,
@@ -496,6 +675,282 @@ export function MarketClient(props: MarketClientProps) {
     ownerAddress,
     refreshShard,
     refreshSlot,
+    sendAndIndex,
+    shardAddress,
+    signer,
+  ])
+
+  const handleSuggestFunding = useCallback(async () => {
+    setErrorMessage(null)
+    setSignature(null)
+    if (!currentSlot) {
+      setErrorMessage("Slot unknown; refresh first.")
+      return
+    }
+
+    setIsSubmitting(true)
+    try {
+      const suggestion = await convexQuery<{
+        tradeCount: number
+        totalNotional: unknown
+        weightedPremiumBps: unknown
+        suggestedRateBpsPerSlot: unknown
+        intervalStartSlot: unknown
+        intervalEndSlot: unknown
+      }>("fundingSuggestions:getSuggestedRateForShard", {
+        shard: shardAddress,
+        endSlot: currentSlot.toString(10),
+        intervalSlots: "150",
+        maxAbsRateBpsPerSlot: "10000",
+      })
+      setFundingSuggestion(suggestion)
+      const next = toBigInt(suggestion.suggestedRateBpsPerSlot) ?? 0n
+      setFundingRateInput(next.toString(10))
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Funding suggestion failed")
+    } finally {
+      setIsSubmitting(false)
+    }
+  }, [currentSlot, shardAddress])
+
+  const handleSetFundingRate = useCallback(async () => {
+    setErrorMessage(null)
+    setSignature(null)
+    if (!ownerAddress || !signer) return
+
+    let newRate: bigint
+    try {
+      newRate = BigInt(fundingRateInput.trim())
+    } catch {
+      setErrorMessage("Enter a valid integer rate (bps per slot).")
+      return
+    }
+
+    const minI64 = -(2n ** 63n)
+    const maxI64 = 2n ** 63n - 1n
+    if (newRate < minI64 || newRate > maxI64) {
+      setErrorMessage("Rate is out of i64 range.")
+      return
+    }
+
+    setIsSubmitting(true)
+    try {
+      const [engine, fundingState] = await Promise.all([
+        getEngineAddress({ shard: shardAddress }),
+        getFundingStateAddress({ shard: shardAddress }),
+      ])
+      const ix = getSetFundingRateInstruction({
+        signer: ownerAddress,
+        oracleFeed: oracleFeedAddress,
+        market: marketAddress,
+        shard: shardAddress,
+        fundingState,
+        engine,
+        newRateBpsPerSlot: newRate,
+      })
+      await sendAndIndex([ix])
+      await Promise.all([refreshShard(), refreshFundingHistory()])
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Funding update failed")
+    } finally {
+      setIsSubmitting(false)
+    }
+  }, [
+    fundingRateInput,
+    marketAddress,
+    oracleFeedAddress,
+    ownerAddress,
+    refreshFundingHistory,
+    refreshShard,
+    sendAndIndex,
+    shardAddress,
+    signer,
+  ])
+
+  const handleSetRiskConfig = useCallback(async () => {
+    setErrorMessage(null)
+    setSignature(null)
+    if (!ownerAddress || !signer) return
+    if (!isMarketAuthority) {
+      setErrorMessage("Only the market authority can update risk config.")
+      return
+    }
+
+    let symHalfLifeSlots: bigint
+    let dirHalfLifeSlots: bigint
+    try {
+      symHalfLifeSlots = BigInt(riskSymHalfLifeInput.trim())
+      dirHalfLifeSlots = BigInt(riskDirHalfLifeInput.trim())
+    } catch {
+      setErrorMessage("Enter valid integer half-life slots.")
+      return
+    }
+    if (symHalfLifeSlots <= 0n || dirHalfLifeSlots <= 0n) {
+      setErrorMessage("Half-life slots must be > 0.")
+      return
+    }
+
+    setIsSubmitting(true)
+    try {
+      const riskState = await getRiskStateAddress({ shard: shardAddress })
+      const ix = getSetRiskConfigInstruction({
+        authority: ownerAddress,
+        oracleFeed: oracleFeedAddress,
+        market: marketAddress,
+        shard: shardAddress,
+        riskState,
+        symHalfLifeSlots,
+        dirHalfLifeSlots,
+      })
+      await sendAndIndex([ix])
+      await refreshShard()
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Risk config update failed")
+    } finally {
+      setIsSubmitting(false)
+    }
+  }, [
+    isMarketAuthority,
+    marketAddress,
+    oracleFeedAddress,
+    ownerAddress,
+    refreshShard,
+    riskDirHalfLifeInput,
+    riskSymHalfLifeInput,
+    sendAndIndex,
+    shardAddress,
+    signer,
+  ])
+
+  const handleSetMarketRails = useCallback(async () => {
+    setErrorMessage(null)
+    setSignature(null)
+    if (!ownerAddress || !signer) return
+    if (!isMarketAuthority) {
+      setErrorMessage("Only the market authority can update rails.")
+      return
+    }
+
+    const tier1Notional = parseFixedDecimal(railsTier1NotionalInput, 6)
+    const tier2Notional = parseFixedDecimal(railsTier2NotionalInput, 6)
+    const tier3Notional = parseFixedDecimal(railsTier3NotionalInput, 6)
+    if (!tier1Notional || !tier2Notional || !tier3Notional) {
+      setErrorMessage("Enter valid tier notionals (USDC, up to 6 decimals).")
+      return
+    }
+
+    const tier1Dev = Number(railsTier1DevBpsInput.trim())
+    const tier2Dev = Number(railsTier2DevBpsInput.trim())
+    const tier3Dev = Number(railsTier3DevBpsInput.trim())
+    if (
+      !Number.isFinite(tier1Dev) ||
+      !Number.isFinite(tier2Dev) ||
+      !Number.isFinite(tier3Dev) ||
+      !Number.isInteger(tier1Dev) ||
+      !Number.isInteger(tier2Dev) ||
+      !Number.isInteger(tier3Dev) ||
+      tier1Dev <= 0 ||
+      tier2Dev <= 0 ||
+      tier3Dev <= 0
+    ) {
+      setErrorMessage("Enter valid tier max dev bps (positive integers).")
+      return
+    }
+
+    setIsSubmitting(true)
+    try {
+      const rails = await getRailsAddress({ shard: shardAddress })
+      const ix = getSetMarketRailsInstruction({
+        authority: ownerAddress,
+        oracleFeed: oracleFeedAddress,
+        market: marketAddress,
+        shard: shardAddress,
+        rails,
+        tiers: [
+          { maxNotional: tier1Notional, maxOracleDeviationBps: tier1Dev },
+          { maxNotional: tier2Notional, maxOracleDeviationBps: tier2Dev },
+          { maxNotional: tier3Notional, maxOracleDeviationBps: tier3Dev },
+        ],
+      })
+      await sendAndIndex([ix])
+      await refreshShard()
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Rails update failed")
+    } finally {
+      setIsSubmitting(false)
+    }
+  }, [
+    isMarketAuthority,
+    marketAddress,
+    oracleFeedAddress,
+    ownerAddress,
+    railsTier1DevBpsInput,
+    railsTier1NotionalInput,
+    railsTier2DevBpsInput,
+    railsTier2NotionalInput,
+    railsTier3DevBpsInput,
+    railsTier3NotionalInput,
+    refreshShard,
+    sendAndIndex,
+    shardAddress,
+    signer,
+  ])
+
+  const handleSetLiquidationConfig = useCallback(async () => {
+    setErrorMessage(null)
+    setSignature(null)
+    if (!ownerAddress || !signer) return
+    if (!isMarketAuthority) {
+      setErrorMessage("Only the market authority can update liquidation config.")
+      return
+    }
+
+    const bountyShareBps = Number(liquidationBountyShareBpsInput.trim())
+    if (
+      !Number.isFinite(bountyShareBps) ||
+      !Number.isInteger(bountyShareBps) ||
+      bountyShareBps < 0 ||
+      bountyShareBps > 10_000
+    ) {
+      setErrorMessage("Enter a valid bounty share bps (0-10000).")
+      return
+    }
+
+    const bountyCapAbs = parseFixedDecimal(liquidationBountyCapUsdcInput, 6)
+    if (bountyCapAbs === null) {
+      setErrorMessage("Enter a valid bounty cap (USDC, up to 6 decimals).")
+      return
+    }
+
+    setIsSubmitting(true)
+    try {
+      const liquidationConfig = await getLiquidationConfigAddress({ shard: shardAddress })
+      const ix = getSetLiquidationConfigInstruction({
+        authority: ownerAddress,
+        oracleFeed: oracleFeedAddress,
+        market: marketAddress,
+        shard: shardAddress,
+        liquidationConfig,
+        isEnabled: liquidationBountyIsEnabledInput,
+        bountyShareBps,
+        bountyCapAbs,
+      })
+      await sendAndIndex([ix])
+      await refreshShard()
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Liquidation config update failed")
+    } finally {
+      setIsSubmitting(false)
+    }
+  }, [
+    isMarketAuthority,
+    liquidationBountyCapUsdcInput,
+    liquidationBountyIsEnabledInput,
+    liquidationBountyShareBpsInput,
+    marketAddress,
+    oracleFeedAddress,
+    ownerAddress,
+    refreshShard,
     sendAndIndex,
     shardAddress,
     signer,
@@ -656,7 +1111,10 @@ export function MarketClient(props: MarketClientProps) {
       if (!rpcUrl) throw new Error("No RPC endpoint configured")
       const rpc = createSolanaRpc(rpcUrl)
       const engine = await getEngineAddress({ shard: shardAddress })
+      const riskState = await getRiskStateAddress({ shard: shardAddress })
       const trader = await getTraderAddress({ shard: shardAddress, owner: ownerAddress })
+      const fundingAccumulator = await getFundingAccumulatorAddress({ shard: shardAddress })
+      const traderFundingState = await getTraderFundingStateAddress({ trader })
       const tokenProgram = await getMintTokenProgramAddress({
         rpc,
         mint: collateralMintAddress,
@@ -710,6 +1168,7 @@ export function MarketClient(props: MarketClientProps) {
             oracleFeed: oracleFeedAddress,
             market: marketAddress,
             shard: shardAddress,
+            riskState,
             engine,
             nowSlot: 0n,
             oraclePrice,
@@ -720,11 +1179,26 @@ export function MarketClient(props: MarketClientProps) {
       }
 
       ixs.push(
+        getTouchTraderFundingInstruction({
+          signer: ownerAddress,
+          oracleFeed: oracleFeedAddress,
+          market: marketAddress,
+          shard: shardAddress,
+          riskState,
+          trader,
+          engine,
+          fundingAccumulator,
+          traderFundingState,
+        }),
+      )
+
+      ixs.push(
         getWithdrawInstruction({
           owner: ownerAddress,
           oracleFeed: oracleFeedAddress,
           market: marketAddress,
           shard: shardAddress,
+          riskState,
           engine,
           trader,
           collateralMint: collateralMintAddress,
@@ -832,9 +1306,15 @@ export function MarketClient(props: MarketClientProps) {
 
     setIsSubmitting(true)
     try {
-      const engine = await getEngineAddress({ shard: shardAddress })
-      const lpPool = await getLpPoolAddress({ shard: shardAddress })
-      const trader = await getTraderAddress({ shard: shardAddress, owner: ownerAddress })
+      const [engine, riskState, rails, lpPool, trader, fundingAccumulator] = await Promise.all([
+        getEngineAddress({ shard: shardAddress }),
+        getRiskStateAddress({ shard: shardAddress }),
+        getRailsAddress({ shard: shardAddress }),
+        getLpPoolAddress({ shard: shardAddress }),
+        getTraderAddress({ shard: shardAddress, owner: ownerAddress }),
+        getFundingAccumulatorAddress({ shard: shardAddress }),
+      ])
+      const traderFundingState = await getTraderFundingStateAddress({ trader })
 
       const ixs: Instruction[] = []
       if (isCrankStale === true) {
@@ -844,6 +1324,7 @@ export function MarketClient(props: MarketClientProps) {
             oracleFeed: oracleFeedAddress,
             market: marketAddress,
             shard: shardAddress,
+            riskState,
             engine,
             nowSlot: 0n,
             oraclePrice: quote.oraclePrice,
@@ -853,12 +1334,28 @@ export function MarketClient(props: MarketClientProps) {
         )
       }
 
+      ixs.push(
+        getTouchTraderFundingInstruction({
+          signer: ownerAddress,
+          oracleFeed: oracleFeedAddress,
+          market: marketAddress,
+          shard: shardAddress,
+          riskState,
+          trader,
+          engine,
+          fundingAccumulator,
+          traderFundingState,
+        }),
+      )
+
       const baseIx = getExecuteTradeInstruction({
         owner: ownerAddress,
         matcher: matcherAuthorityAddress,
         oracleFeed: oracleFeedAddress,
         market: marketAddress,
         shard: shardAddress,
+        riskState,
+        rails,
         engine,
         lpPool,
         trader,
@@ -950,7 +1447,11 @@ export function MarketClient(props: MarketClientProps) {
     setIsSubmitting(true)
     try {
       const shard = await getShardAddress({ market: marketAddress, shardSeed })
-      const engine = await getEngineAddress({ shard })
+      const [engine, riskState, rails] = await Promise.all([
+        getEngineAddress({ shard }),
+        getRiskStateAddress({ shard }),
+        getRailsAddress({ shard }),
+      ])
 
       const ix = getInitShardInstruction({
         payer: ownerAddress,
@@ -958,6 +1459,8 @@ export function MarketClient(props: MarketClientProps) {
         market: marketAddress,
         shardSeed,
         shard,
+        riskState,
+        rails,
         engine,
         shardId,
       })
@@ -1031,7 +1534,7 @@ export function MarketClient(props: MarketClientProps) {
   const handleLiquidate = useCallback(async () => {
     setErrorMessage(null)
     setSignature(null)
-    if (!ownerAddress || !signer) return
+    if (!ownerAddress || !signer || !client) return
 
     const liquidateeEngineIndex = Number(liquidateeEngineIndexInput.trim())
     if (
@@ -1046,9 +1549,62 @@ export function MarketClient(props: MarketClientProps) {
 
     setIsSubmitting(true)
     try {
-      const engine = await getEngineAddress({ shard: shardAddress })
+      const rpcUrl = client.getRpcUrl()
+      if (!rpcUrl) throw new Error("No RPC endpoint configured")
+      const rpc = createSolanaRpc(rpcUrl)
+
+      const [engine, riskState, tokenProgram] = await Promise.all([
+        getEngineAddress({ shard: shardAddress }),
+        getRiskStateAddress({ shard: shardAddress }),
+        getMintTokenProgramAddress({ rpc, mint: collateralMintAddress }),
+      ])
+
+      const liquidationConfig = await getLiquidationConfigAddress({ shard: shardAddress })
+      const liquidationConfigAccount = await rpc
+        .getAccountInfo(liquidationConfig, { encoding: "base64" })
+        .send()
+      const liquidationConfigForIx = liquidationConfigAccount.value ? liquidationConfig : undefined
+
+      const keeperCollateral = await getAssociatedTokenAddress({
+        owner: ownerAddress,
+        mint: collateralMintAddress,
+        tokenProgram,
+      })
+      const vaultCollateral = await getAssociatedTokenAddress({
+        owner: shardAddress,
+        mint: collateralMintAddress,
+        tokenProgram,
+      })
 
       const ixs: Instruction[] = []
+      const keeperAccount = await rpc
+        .getAccountInfo(keeperCollateral, { encoding: "base64" })
+        .send()
+      if (!keeperAccount.value) {
+        ixs.push(
+          getCreateAssociatedTokenAccountInstruction({
+            payer: ownerAddress,
+            associatedToken: keeperCollateral,
+            owner: ownerAddress,
+            mint: collateralMintAddress,
+            tokenProgram,
+          }),
+        )
+      }
+      const vaultAccount = await rpc
+        .getAccountInfo(vaultCollateral, { encoding: "base64" })
+        .send()
+      if (!vaultAccount.value) {
+        ixs.push(
+          getCreateAssociatedTokenAccountInstruction({
+            payer: ownerAddress,
+            associatedToken: vaultCollateral,
+            owner: shardAddress,
+            mint: collateralMintAddress,
+            tokenProgram,
+          }),
+        )
+      }
       if (isCrankStale === true) {
         const quote = await convexAction<{ oraclePrice: string }>("matcher:getQuote", {
           oracleFeed: oracleFeedAddress,
@@ -1061,6 +1617,7 @@ export function MarketClient(props: MarketClientProps) {
             oracleFeed: oracleFeedAddress,
             market: marketAddress,
             shard: shardAddress,
+            riskState,
             engine,
             nowSlot: 0n,
             oraclePrice,
@@ -1076,7 +1633,13 @@ export function MarketClient(props: MarketClientProps) {
           oracleFeed: oracleFeedAddress,
           market: marketAddress,
           shard: shardAddress,
+          riskState,
           engine,
+          liquidationConfig: liquidationConfigForIx,
+          collateralMint: collateralMintAddress,
+          keeperCollateral,
+          vaultCollateral,
+          tokenProgram,
           liquidateeEngineIndex,
         }),
       )
@@ -1112,6 +1675,8 @@ export function MarketClient(props: MarketClientProps) {
     sendAndIndex,
     shardAddress,
     signer,
+    collateralMintAddress,
+    client,
   ])
 
   return (
@@ -1210,6 +1775,208 @@ export function MarketClient(props: MarketClientProps) {
                 />
               </div>
             </div>
+
+            <div className="rounded-lg border border-black/10 p-3 dark:border-white/10">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex flex-col gap-1">
+                  <div className="text-sm font-medium text-zinc-950 dark:text-zinc-50">
+                    Risk EMA config
+                  </div>
+                  <div className="text-xs text-zinc-600 dark:text-zinc-300">
+                    Current: sym{" "}
+                    <span className="font-mono">
+                      {riskSymHalfLifeSlots != null ? riskSymHalfLifeSlots.toString(10) : "N/A"}
+                    </span>{" "}
+                    • dir{" "}
+                    <span className="font-mono">
+                      {riskDirHalfLifeSlots != null ? riskDirHalfLifeSlots.toString(10) : "N/A"}
+                    </span>{" "}
+                    (slots)
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSetRiskConfig}
+                  disabled={!ready || isSubmitting}
+                  className="inline-flex h-9 items-center justify-center rounded-md border border-black/10 bg-white px-4 text-sm font-medium text-zinc-950 disabled:opacity-50 dark:border-white/10 dark:bg-black dark:text-zinc-50"
+                >
+                  Set
+                </button>
+              </div>
+
+              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <div className="flex flex-col gap-1">
+                  <div className="text-xs font-medium text-zinc-700 dark:text-zinc-200">
+                    Sym half-life (slots)
+                  </div>
+                  <input
+                    value={riskSymHalfLifeInput}
+                    onChange={(e) => setRiskSymHalfLifeInput(e.target.value)}
+                    inputMode="numeric"
+                    className="h-9 w-full rounded-md border border-black/10 bg-white px-3 text-sm outline-none focus:border-zinc-950 dark:border-white/10 dark:bg-black dark:text-zinc-50 dark:focus:border-white"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <div className="text-xs font-medium text-zinc-700 dark:text-zinc-200">
+                    Dir half-life (slots)
+                  </div>
+                  <input
+                    value={riskDirHalfLifeInput}
+                    onChange={(e) => setRiskDirHalfLifeInput(e.target.value)}
+                    inputMode="numeric"
+                    className="h-9 w-full rounded-md border border-black/10 bg-white px-3 text-sm outline-none focus:border-zinc-950 dark:border-white/10 dark:bg-black dark:text-zinc-50 dark:focus:border-white"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-black/10 p-3 dark:border-white/10">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex flex-col gap-1">
+                  <div className="text-sm font-medium text-zinc-950 dark:text-zinc-50">
+                    Market rails
+                  </div>
+                  <div className="text-xs text-zinc-600 dark:text-zinc-300">
+                    Current tiers:{" "}
+                    <span className="font-mono">
+                      {railsFirstTierMaxNotional != null && railsFirstTierMaxOracleDeviationBps != null
+                        ? `${formatFixedDecimal(railsFirstTierMaxNotional, 6)}@${railsFirstTierMaxOracleDeviationBps}`
+                        : "N/A"}
+                    </span>
+                    {" • "}
+                    <span className="font-mono">
+                      {railsSecondTierMaxNotional != null && railsSecondTierMaxOracleDeviationBps != null
+                        ? `${formatFixedDecimal(railsSecondTierMaxNotional, 6)}@${railsSecondTierMaxOracleDeviationBps}`
+                        : "N/A"}
+                    </span>
+                    {" • "}
+                    <span className="font-mono">
+                      {railsThirdTierMaxNotional != null && railsThirdTierMaxOracleDeviationBps != null
+                        ? `${formatFixedDecimal(railsThirdTierMaxNotional, 6)}@${railsThirdTierMaxOracleDeviationBps}`
+                        : "N/A"}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSetMarketRails}
+                  disabled={!ready || isSubmitting}
+                  className="inline-flex h-9 items-center justify-center rounded-md border border-black/10 bg-white px-4 text-sm font-medium text-zinc-950 disabled:opacity-50 dark:border-white/10 dark:bg-black dark:text-zinc-50"
+                >
+                  Set
+                </button>
+              </div>
+
+              <div className="mt-3 grid grid-cols-1 gap-2">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <input
+                    value={railsTier1NotionalInput}
+                    onChange={(e) => setRailsTier1NotionalInput(e.target.value)}
+                    inputMode="decimal"
+                    className="h-9 w-full rounded-md border border-black/10 bg-white px-3 text-sm outline-none focus:border-zinc-950 dark:border-white/10 dark:bg-black dark:text-zinc-50 dark:focus:border-white"
+                    placeholder="Tier 1 max notional (USDC)"
+                  />
+                  <input
+                    value={railsTier1DevBpsInput}
+                    onChange={(e) => setRailsTier1DevBpsInput(e.target.value)}
+                    inputMode="numeric"
+                    className="h-9 w-full rounded-md border border-black/10 bg-white px-3 text-sm outline-none focus:border-zinc-950 dark:border-white/10 dark:bg-black dark:text-zinc-50 dark:focus:border-white"
+                    placeholder="Tier 1 max dev (bps)"
+                  />
+                </div>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <input
+                    value={railsTier2NotionalInput}
+                    onChange={(e) => setRailsTier2NotionalInput(e.target.value)}
+                    inputMode="decimal"
+                    className="h-9 w-full rounded-md border border-black/10 bg-white px-3 text-sm outline-none focus:border-zinc-950 dark:border-white/10 dark:bg-black dark:text-zinc-50 dark:focus:border-white"
+                    placeholder="Tier 2 max notional (USDC)"
+                  />
+                  <input
+                    value={railsTier2DevBpsInput}
+                    onChange={(e) => setRailsTier2DevBpsInput(e.target.value)}
+                    inputMode="numeric"
+                    className="h-9 w-full rounded-md border border-black/10 bg-white px-3 text-sm outline-none focus:border-zinc-950 dark:border-white/10 dark:bg-black dark:text-zinc-50 dark:focus:border-white"
+                    placeholder="Tier 2 max dev (bps)"
+                  />
+                </div>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <input
+                    value={railsTier3NotionalInput}
+                    onChange={(e) => setRailsTier3NotionalInput(e.target.value)}
+                    inputMode="decimal"
+                    className="h-9 w-full rounded-md border border-black/10 bg-white px-3 text-sm outline-none focus:border-zinc-950 dark:border-white/10 dark:bg-black dark:text-zinc-50 dark:focus:border-white"
+                    placeholder="Tier 3 max notional (USDC)"
+                  />
+                  <input
+                    value={railsTier3DevBpsInput}
+                    onChange={(e) => setRailsTier3DevBpsInput(e.target.value)}
+                    inputMode="numeric"
+                    className="h-9 w-full rounded-md border border-black/10 bg-white px-3 text-sm outline-none focus:border-zinc-950 dark:border-white/10 dark:bg-black dark:text-zinc-50 dark:focus:border-white"
+                    placeholder="Tier 3 max dev (bps)"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-black/10 p-3 dark:border-white/10">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex flex-col gap-1">
+                  <div className="text-sm font-medium text-zinc-950 dark:text-zinc-50">
+                    Liquidation bounty
+                  </div>
+                  <div className="text-xs text-zinc-600 dark:text-zinc-300">
+                    Current:{" "}
+                    <span className="font-mono">
+                      {liquidationBountyIsEnabled != null ? (liquidationBountyIsEnabled ? "on" : "off") : "N/A"}
+                    </span>{" "}
+                    •{" "}
+                    <span className="font-mono">
+                      {liquidationBountyShareBps != null ? liquidationBountyShareBps.toString(10) : "N/A"}
+                    </span>{" "}
+                    bps • cap{" "}
+                    <span className="font-mono">
+                      {liquidationBountyCapAbs != null ? formatFixedDecimal(liquidationBountyCapAbs, 6) : "N/A"}
+                    </span>{" "}
+                    USDC
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSetLiquidationConfig}
+                  disabled={!ready || isSubmitting}
+                  className="inline-flex h-9 items-center justify-center rounded-md border border-black/10 bg-white px-4 text-sm font-medium text-zinc-950 disabled:opacity-50 dark:border-white/10 dark:bg-black dark:text-zinc-50"
+                >
+                  Set
+                </button>
+              </div>
+
+              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                <label className="flex h-9 items-center gap-2 rounded-md border border-black/10 bg-white px-3 text-sm text-zinc-950 dark:border-white/10 dark:bg-black dark:text-zinc-50">
+                  <input
+                    type="checkbox"
+                    checked={liquidationBountyIsEnabledInput}
+                    onChange={(e) => setLiquidationBountyIsEnabledInput(e.target.checked)}
+                    className="h-4 w-4"
+                  />
+                  Enabled
+                </label>
+                <input
+                  value={liquidationBountyShareBpsInput}
+                  onChange={(e) => setLiquidationBountyShareBpsInput(e.target.value)}
+                  inputMode="numeric"
+                  className="h-9 w-full rounded-md border border-black/10 bg-white px-3 text-sm outline-none focus:border-zinc-950 dark:border-white/10 dark:bg-black dark:text-zinc-50 dark:focus:border-white"
+                  placeholder="Share (bps)"
+                />
+                <input
+                  value={liquidationBountyCapUsdcInput}
+                  onChange={(e) => setLiquidationBountyCapUsdcInput(e.target.value)}
+                  inputMode="decimal"
+                  className="h-9 w-full rounded-md border border-black/10 bg-white px-3 text-sm outline-none focus:border-zinc-950 dark:border-white/10 dark:bg-black dark:text-zinc-50 dark:focus:border-white"
+                  placeholder="Cap (USDC)"
+                />
+              </div>
+            </div>
           </div>
         </div>
       ) : null}
@@ -1252,6 +2019,88 @@ export function MarketClient(props: MarketClientProps) {
             Crank now
           </button>
         </div>
+      </div>
+
+      <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-black">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex flex-col gap-1">
+            <div className="text-sm font-medium text-zinc-950 dark:text-zinc-50">
+              Funding
+            </div>
+            <div className="text-xs text-zinc-600 dark:text-zinc-300">
+              Current rate:{" "}
+              <span className="font-mono">
+                {fundingRateBpsPerSlot != null ? fundingRateBpsPerSlot.toString(10) : "N/A"}
+              </span>{" "}
+              bps/slot
+              {fundingUpdatedAtSlot != null ? (
+                <>
+                  {" "}
+                  (updated @ <span className="font-mono">{fundingUpdatedAtSlot.toString(10)}</span>)
+                </>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handleSuggestFunding}
+              disabled={!ready || isSubmitting}
+              className="inline-flex h-9 items-center justify-center rounded-md border border-black/10 bg-white px-4 text-sm font-medium text-zinc-950 disabled:opacity-50 dark:border-white/10 dark:bg-black dark:text-zinc-50"
+            >
+              Suggest
+            </button>
+            <button
+              type="button"
+              onClick={handleSetFundingRate}
+              disabled={!ready || isSubmitting}
+              className="inline-flex h-9 items-center justify-center rounded-md border border-black/10 bg-white px-4 text-sm font-medium text-zinc-950 disabled:opacity-50 dark:border-white/10 dark:bg-black dark:text-zinc-50"
+            >
+              Set
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-[1fr_1fr]">
+          <input
+            value={fundingRateInput}
+            onChange={(e) => setFundingRateInput(e.target.value)}
+            inputMode="numeric"
+            className="h-9 w-full rounded-md border border-black/10 bg-white px-3 text-sm outline-none focus:border-zinc-950 dark:border-white/10 dark:bg-black dark:text-zinc-50 dark:focus:border-white"
+            placeholder="bps per slot (i64)"
+          />
+          <div className="text-xs text-zinc-600 dark:text-zinc-300">
+            Suggested:{" "}
+            <span className="font-mono">
+              {fundingSuggestion
+                ? (toBigInt(fundingSuggestion.suggestedRateBpsPerSlot) ?? 0n).toString(10)
+                : "N/A"}
+            </span>{" "}
+            bps/slot{" "}
+            {fundingSuggestion ? (
+              <>
+                • trades {fundingSuggestion.tradeCount.toString(10)} • premium{" "}
+                <span className="font-mono">
+                  {(toBigInt(fundingSuggestion.weightedPremiumBps) ?? 0n).toString(10)}
+                </span>{" "}
+                bps
+              </>
+            ) : null}
+          </div>
+        </div>
+
+        {fundingHistory.length ? (
+          <div className="mt-3 text-xs text-zinc-600 dark:text-zinc-300">
+            Recent:{" "}
+            {fundingHistory.slice(0, 3).map((row, idx) => (
+              <span key={row.signature} className="font-mono">
+                {idx ? " • " : ""}
+                {(toBigInt(row.newRateBpsPerSlot) ?? 0n).toString(10)}@{(toBigInt(row.nowSlot) ?? 0n).toString(10)}
+              </span>
+            ))}
+          </div>
+        ) : null}
       </div>
 
       <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-black">
@@ -1486,6 +2335,7 @@ export function MarketClient(props: MarketClientProps) {
                 const nowSlot = toBigInt(l.nowSlot) ?? 0n
                 const oraclePrice = toBigInt(l.oraclePrice) ?? 0n
                 const effQ = toBigInt(l.oldEffectivePosQ) ?? 0n
+                const bountyPaid = toBigInt(l.bountyPaid) ?? 0n
                 return (
                   <div key={l._id} className="flex flex-wrap items-center gap-x-3 gap-y-1">
                     <span className="font-mono">{l.signature.slice(0, 8)}…</span>
@@ -1495,6 +2345,11 @@ export function MarketClient(props: MarketClientProps) {
                     </span>
                     <span className="font-mono">{formatSignedFixedDecimal(effQ, 6)} SOL</span>
                     <span className="font-mono">{formatFixedDecimal(oraclePrice, 6)} USD</span>
+                    {bountyPaid > 0n ? (
+                      <span className="font-mono">
+                        bounty {formatFixedDecimal(bountyPaid, 6)} USDC
+                      </span>
+                    ) : null}
                     <span className="font-mono">slot {nowSlot.toString(10)}</span>
                   </div>
                 )
@@ -1550,6 +2405,24 @@ export function MarketClient(props: MarketClientProps) {
                     <span className="font-mono">{e.signature.slice(0, 8)}…</span>
                     <span className="font-mono">{formatSignedFixedDecimal(sizeQ, 6)} SOL</span>
                     <span className="font-mono">@ {formatFixedDecimal(execPrice, 6)} USD</span>
+                    <span className="font-mono">slot {slot.toString(10)}</span>
+                  </div>
+                )
+              }
+
+              if (e.type === "FundingPayment") {
+                const delta = toBigInt(e.deltaFundingPnl) ?? 0n
+                const cumulative = toBigInt(e.cumulativeFundingPnl) ?? 0n
+                return (
+                  <div key={e.signature} className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span className="rounded-full bg-zinc-100 px-2 py-0.5 font-mono text-[11px] text-zinc-700 dark:bg-white/10 dark:text-zinc-200">
+                      Funding
+                    </span>
+                    <span className="font-mono">{e.signature.slice(0, 8)}…</span>
+                    <span className="font-mono">{formatSignedFixedDecimal(delta, 6)} USDC</span>
+                    <span className="text-zinc-500 dark:text-zinc-400">
+                      cum <span className="font-mono">{formatSignedFixedDecimal(cumulative, 6)}</span>
+                    </span>
                     <span className="font-mono">slot {slot.toString(10)}</span>
                   </div>
                 )

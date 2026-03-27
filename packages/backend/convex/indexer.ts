@@ -6,9 +6,16 @@ import { v } from "convex/values"
 import {
   decodeBase64,
   extractProgramDataBase64,
+  parseAccountClosedEvent,
+  parseAccountReclaimedEvent,
   parseCrankEvent,
   parseDepositEvent,
+  parseDustGarbageCollectedEvent,
+  parseFundingPaymentEvent,
+  parseFundingRateUpdatedEvent,
+  parseLiquidationConfigUpdatedEvent,
   parseLiquidationEvent,
+  parseLiquidationBountyPaidEvent,
   parseLpBandConfiguredEvent,
   parseLpWithdrawalClaimedEvent,
   parseLpWithdrawalRequestedEvent,
@@ -16,8 +23,12 @@ import {
   parseLpPositionOpenedEvent,
   parseMarketInitializedEvent,
   parseMatcherAuthorityUpdatedEvent,
+  parseRailsUpdatedEvent,
+  parseRiskConfigUpdatedEvent,
+  parseRiskStateUpdatedEvent,
   parseShardInitializedEvent,
   parseTradeExecutedEvent,
+  parseTraderClosedEvent,
   parseTraderOpenedEvent,
   parseWithdrawalEvent,
 } from "./lib/quasar_events"
@@ -32,6 +43,22 @@ const applyMatcherAuthorityUpdatedEvent = makeFunctionReference<"mutation">(
 
 const upsertFromShardInitializedEvent = makeFunctionReference<"mutation">(
   "shards:upsertFromShardInitializedEvent",
+)
+
+const applyRiskStateUpdatedEvent = makeFunctionReference<"mutation">(
+  "shards:applyRiskStateUpdatedEvent",
+)
+
+const applyRiskConfigUpdatedEvent = makeFunctionReference<"mutation">(
+  "shards:applyRiskConfigUpdatedEvent",
+)
+
+const applyRailsUpdatedEvent = makeFunctionReference<"mutation">(
+  "shards:applyRailsUpdatedEvent",
+)
+
+const applyLiquidationConfigUpdatedEvent = makeFunctionReference<"mutation">(
+  "shards:applyLiquidationConfigUpdatedEvent",
 )
 
 const upsertFromOpenedEvent = makeFunctionReference<"mutation">(
@@ -94,6 +121,31 @@ const applyWithdrawalEvent = makeFunctionReference<"mutation">(
 
 const applyLiquidationEvent = makeFunctionReference<"mutation">(
   "liquidations:applyLiquidationEvent",
+)
+
+const applyLiquidationBountyPaidEvent = makeFunctionReference<"mutation">(
+  "liquidations:applyLiquidationBountyPaidEvent",
+)
+
+const applyFundingRateUpdatedEvent = makeFunctionReference<"mutation">(
+  "fundingUpdates:applyFundingRateUpdatedEvent",
+)
+
+const applyFundingPaymentEvent = makeFunctionReference<"mutation">(
+  "fundingPayments:applyFundingPaymentEvent",
+)
+
+const applyAccountClosedEvent = makeFunctionReference<"mutation">(
+  "housekeeping:applyAccountClosedEvent",
+)
+const applyTraderClosedEvent = makeFunctionReference<"mutation">(
+  "housekeeping:applyTraderClosedEvent",
+)
+const applyAccountReclaimedEvent = makeFunctionReference<"mutation">(
+  "housekeeping:applyAccountReclaimedEvent",
+)
+const applyDustGarbageCollectedEvent = makeFunctionReference<"mutation">(
+  "housekeeping:applyDustGarbageCollectedEvent",
 )
 
 async function getTransactionLogs(args: {
@@ -202,6 +254,31 @@ export const indexTransaction = actionGeneric({
       | { type: "TraderOpened"; trader: string; owner: string; engineIndex: number }
       | { type: "Deposit"; trader: string; owner: string; amount: bigint; engineIndex: number }
       | { type: "Crank"; market: string; shard: string; lastCrankSlot: bigint; advanced: boolean }
+      | {
+          type: "FundingRateUpdated"
+          market: string
+          shard: string
+          newRateBpsPerSlot: bigint
+        }
+      | { type: "FundingPayment"; owner: string; deltaFundingPnl: bigint }
+      | { type: "AccountClosed"; owner: string; engineIndex: number; amountReturned: bigint }
+      | { type: "TraderClosed"; trader: string; owner: string; amountReturned: bigint }
+      | { type: "AccountReclaimed"; engineIndex: number; dustSwept: bigint }
+      | { type: "DustGarbageCollected"; numClosed: number; dustSwept: bigint }
+      | {
+          type: "RiskConfigUpdated"
+          shard: string
+          symHalfLifeSlots: bigint
+          dirHalfLifeSlots: bigint
+        }
+      | { type: "RailsUpdated"; shard: string }
+      | {
+          type: "LiquidationConfigUpdated"
+          shard: string
+          isEnabled: boolean
+          bountyShareBps: number
+          bountyCapAbs: bigint
+        }
       | {
           type: "TradeExecuted"
           trader: string
@@ -450,6 +527,115 @@ export const indexTransaction = actionGeneric({
           continue
         }
 
+        const risk = parseRiskStateUpdatedEvent(bytes)
+        if (risk) {
+          await ctx.runMutation(applyRiskStateUpdatedEvent, {
+            shard: risk.shard,
+            riskUpdatedAtSlot: risk.nowSlot,
+            oraclePrice: risk.oraclePrice,
+            riskPrice: risk.riskPrice,
+            emaSymPrice: risk.emaSymPrice,
+            emaDirDownPrice: risk.emaDirDownPrice,
+            emaDirUpPrice: risk.emaDirUpPrice,
+          })
+          continue
+        }
+
+        const riskConfig = parseRiskConfigUpdatedEvent(bytes)
+        if (riskConfig) {
+          await ctx.runMutation(applyRiskConfigUpdatedEvent, {
+            shard: riskConfig.shard,
+            riskUpdatedAtSlot: riskConfig.nowSlot,
+            riskSymHalfLifeSlots: riskConfig.symHalfLifeSlots,
+            riskDirHalfLifeSlots: riskConfig.dirHalfLifeSlots,
+          })
+          indexed.push({
+            type: "RiskConfigUpdated",
+            shard: riskConfig.shard,
+            symHalfLifeSlots: riskConfig.symHalfLifeSlots,
+            dirHalfLifeSlots: riskConfig.dirHalfLifeSlots,
+          })
+          continue
+        }
+
+        const rails = parseRailsUpdatedEvent(bytes)
+        if (rails) {
+          await ctx.runMutation(applyRailsUpdatedEvent, {
+            shard: rails.shard,
+            railsUpdatedAtSlot: rails.nowSlot,
+            railsFirstTierMaxNotional: rails.firstTierMaxNotional,
+            railsFirstTierMaxOracleDeviationBps: rails.firstTierMaxOracleDeviationBps,
+            railsSecondTierMaxNotional: rails.secondTierMaxNotional,
+            railsSecondTierMaxOracleDeviationBps: rails.secondTierMaxOracleDeviationBps,
+            railsThirdTierMaxNotional: rails.thirdTierMaxNotional,
+            railsThirdTierMaxOracleDeviationBps: rails.thirdTierMaxOracleDeviationBps,
+          })
+          indexed.push({ type: "RailsUpdated", shard: rails.shard })
+          continue
+        }
+
+        const liqConfig = parseLiquidationConfigUpdatedEvent(bytes)
+        if (liqConfig) {
+          await ctx.runMutation(applyLiquidationConfigUpdatedEvent, {
+            shard: liqConfig.shard,
+            liquidationConfigUpdatedAtSlot: liqConfig.nowSlot,
+            liquidationBountyIsEnabled: liqConfig.isEnabled,
+            liquidationBountyShareBps: liqConfig.bountyShareBps,
+            liquidationBountyCapAbs: liqConfig.bountyCapAbs,
+          })
+          indexed.push({
+            type: "LiquidationConfigUpdated",
+            shard: liqConfig.shard,
+            isEnabled: liqConfig.isEnabled,
+            bountyShareBps: liqConfig.bountyShareBps,
+            bountyCapAbs: liqConfig.bountyCapAbs,
+          })
+          continue
+        }
+
+        const fundingPayment = parseFundingPaymentEvent(bytes)
+        if (fundingPayment) {
+          await ctx.runMutation(applyFundingPaymentEvent, {
+            signature: args.signature,
+            slot,
+            market: fundingPayment.market,
+            shard: fundingPayment.shard,
+            trader: fundingPayment.trader,
+            owner: fundingPayment.owner,
+            engineIndex: fundingPayment.engineIndex,
+            nowSlot: fundingPayment.nowSlot,
+            deltaFundingPnl: fundingPayment.deltaFundingPnl,
+            cumulativeFundingPnl: fundingPayment.cumulativeFundingPnl,
+          })
+          indexed.push({
+            type: "FundingPayment",
+            owner: fundingPayment.owner,
+            deltaFundingPnl: fundingPayment.deltaFundingPnl,
+          })
+          continue
+        }
+
+        const funding = parseFundingRateUpdatedEvent(bytes)
+        if (funding) {
+          await ctx.runMutation(applyFundingRateUpdatedEvent, {
+            signature: args.signature,
+            slot,
+            market: funding.market,
+            shard: funding.shard,
+            nowSlot: funding.nowSlot,
+            oldRateBpsPerSlot: funding.oldRateBpsPerSlot,
+            newRateBpsPerSlot: funding.newRateBpsPerSlot,
+            intervalSlots: funding.intervalSlots,
+          })
+          indexed.push({
+            type: "FundingRateUpdated",
+            market: funding.market,
+            shard: funding.shard,
+            newRateBpsPerSlot: funding.newRateBpsPerSlot,
+          })
+          continue
+        }
+
         const trade = parseTradeExecutedEvent(bytes)
         if (trade) {
           await ctx.runMutation(applyTradeExecutedEvent, {
@@ -500,6 +686,87 @@ export const indexTransaction = actionGeneric({
           continue
         }
 
+        const traderClosed = parseTraderClosedEvent(bytes)
+        if (traderClosed) {
+          await ctx.runMutation(applyTraderClosedEvent, {
+            signature: args.signature,
+            slot,
+            market: traderClosed.market,
+            shard: traderClosed.shard,
+            trader: traderClosed.trader,
+            owner: traderClosed.owner,
+            engineIndex: traderClosed.engineIndex,
+            amountReturned: traderClosed.amountReturned,
+            nowSlot: traderClosed.nowSlot,
+          })
+          indexed.push({
+            type: "TraderClosed",
+            trader: traderClosed.trader,
+            owner: traderClosed.owner,
+            amountReturned: traderClosed.amountReturned,
+          })
+          continue
+        }
+
+        const accountClosed = parseAccountClosedEvent(bytes)
+        if (accountClosed) {
+          await ctx.runMutation(applyAccountClosedEvent, {
+            signature: args.signature,
+            slot,
+            market: accountClosed.market,
+            shard: accountClosed.shard,
+            owner: accountClosed.owner,
+            engineIndex: accountClosed.engineIndex,
+            amountReturned: accountClosed.amountReturned,
+            nowSlot: accountClosed.nowSlot,
+          })
+          indexed.push({
+            type: "AccountClosed",
+            owner: accountClosed.owner,
+            engineIndex: accountClosed.engineIndex,
+            amountReturned: accountClosed.amountReturned,
+          })
+          continue
+        }
+
+        const reclaimed = parseAccountReclaimedEvent(bytes)
+        if (reclaimed) {
+          await ctx.runMutation(applyAccountReclaimedEvent, {
+            signature: args.signature,
+            slot,
+            market: reclaimed.market,
+            shard: reclaimed.shard,
+            engineIndex: reclaimed.engineIndex,
+            dustSwept: reclaimed.dustSwept,
+            nowSlot: reclaimed.nowSlot,
+          })
+          indexed.push({
+            type: "AccountReclaimed",
+            engineIndex: reclaimed.engineIndex,
+            dustSwept: reclaimed.dustSwept,
+          })
+          continue
+        }
+
+        const gc = parseDustGarbageCollectedEvent(bytes)
+        if (gc) {
+          await ctx.runMutation(applyDustGarbageCollectedEvent, {
+            signature: args.signature,
+            slot,
+            market: gc.market,
+            shard: gc.shard,
+            numClosed: gc.numClosed,
+            dustSwept: gc.dustSwept,
+            nowSlot: gc.nowSlot,
+          })
+          indexed.push({
+            type: "DustGarbageCollected",
+            numClosed: gc.numClosed,
+            dustSwept: gc.dustSwept,
+          })
+          continue
+        }
+
         const liquidation = parseLiquidationEvent(bytes)
         if (liquidation) {
           await ctx.runMutation(applyLiquidationEvent, {
@@ -521,6 +788,15 @@ export const indexTransaction = actionGeneric({
             liquidateeOwner: liquidation.liquidateeOwner,
             liquidated: liquidation.liquidated,
             liquidateeEngineIndex: liquidation.liquidateeEngineIndex,
+          })
+          continue
+        }
+
+        const bountyPaid = parseLiquidationBountyPaidEvent(bytes)
+        if (bountyPaid) {
+          await ctx.runMutation(applyLiquidationBountyPaidEvent, {
+            signature: args.signature,
+            bountyPaid: bountyPaid.bountyPaid,
           })
           continue
         }

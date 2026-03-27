@@ -11,6 +11,8 @@ out
 # build outputs
 dist
 coverage
+target
+**/target
 
 # env files (convex creates packages/backend/.env.local)
 .env
@@ -29,6 +31,12 @@ apps/chain/.anchor
 apps/chain/test-ledger
 apps/chain/**/target
 
+# local Convex scratch dir (this repo uses packages/backend/convex/)
+/convex/
+
+# crate-local lockfiles (avoid accidental generation)
+crates/**/Cargo.lock
+
 # logs
 *.log
 npm-debug.log*
@@ -36,7 +44,10 @@ pnpm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+sim.jsonl
+
 .agents/
 .cursor/
 /docs/
 /references/
+/plans/

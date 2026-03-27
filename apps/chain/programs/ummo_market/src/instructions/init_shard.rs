@@ -1,11 +1,11 @@
 use anchor_lang::prelude::*;
 
 use crate::{
-    constants::{ENGINE_SEED, MARKET_SEED, SHARD_SEED},
+    constants::{ENGINE_SEED, MARKET_SEED, RAILS_SEED, RISK_STATE_SEED, SHARD_SEED, USDC_ONE},
     engine::{add_house_lp, create_engine_account, init_engine, with_engine_mut},
     error::UmmoError,
-    events::ShardInitialized,
-    state::{MarketConfig, MarketShard},
+    events::{RailsUpdated, RiskConfigUpdated, ShardInitialized},
+    state::{MarketConfig, MarketRails, MarketShard, RailTier, RiskState},
 };
 
 #[derive(Accounts)]
@@ -33,6 +33,24 @@ pub struct InitShard<'info> {
         bump
     )]
     pub shard: Account<'info, MarketShard>,
+
+    #[account(
+        init,
+        payer = payer,
+        space = RiskState::SPACE,
+        seeds = [RISK_STATE_SEED, shard.key().as_ref()],
+        bump
+    )]
+    pub risk_state: Account<'info, RiskState>,
+
+    #[account(
+        init,
+        payer = payer,
+        space = MarketRails::SPACE,
+        seeds = [RAILS_SEED, shard.key().as_ref()],
+        bump
+    )]
+    pub rails: Account<'info, MarketRails>,
 
     /// CHECK: engine account is validated by PDA seeds and initialized via system program.
     #[account(mut, seeds = [ENGINE_SEED, shard.key().as_ref()], bump)]
@@ -79,6 +97,43 @@ pub fn handler(ctx: Context<InitShard>, shard_id: u16) -> Result<()> {
     })?;
     shard.house_engine_index = add_house_lp(&ctx.accounts.engine, &ctx.accounts.market.matcher_authority)?;
 
+    // Initialize risk state and rails defaults.
+    let now_slot = created_at_slot;
+
+    let risk_state = &mut ctx.accounts.risk_state;
+    risk_state.market = ctx.accounts.market.key();
+    risk_state.shard = shard.key();
+    risk_state.bump = ctx.bumps.risk_state;
+    // Conservative-but-usable defaults; operator can tune later.
+    risk_state.sym_half_life_slots = 900; // ~6 minutes @ 400ms/slot
+    risk_state.dir_half_life_slots = 8; // ~3s @ 400ms/slot
+    // Seed values will be initialized on the first oracle-read instruction (crank/trade/withdraw).
+    risk_state.ema_sym_price = 0;
+    risk_state.ema_dir_down_price = 0;
+    risk_state.ema_dir_up_price = 0;
+    risk_state.last_oracle_price = 0;
+    risk_state.last_update_slot = now_slot;
+
+    let rails = &mut ctx.accounts.rails;
+    rails.market = ctx.accounts.market.key();
+    rails.shard = shard.key();
+    rails.bump = ctx.bumps.rails;
+    rails.tiers = [
+        RailTier {
+            max_notional: 250 * USDC_ONE,
+            max_oracle_deviation_bps: 40,
+        },
+        RailTier {
+            max_notional: 500 * USDC_ONE,
+            max_oracle_deviation_bps: 75,
+        },
+        RailTier {
+            max_notional: 1_000 * USDC_ONE,
+            max_oracle_deviation_bps: 120,
+        },
+    ];
+    rails.updated_at_slot = now_slot;
+
     emit!(ShardInitialized {
         market: ctx.accounts.market.key(),
         shard: shard.key(),
@@ -88,6 +143,26 @@ pub fn handler(ctx: Context<InitShard>, shard_id: u16) -> Result<()> {
         house_engine_index: shard.house_engine_index,
         created_at_slot,
         last_crank_slot: created_at_slot,
+    });
+
+    emit!(RiskConfigUpdated {
+        market: ctx.accounts.market.key(),
+        shard: shard.key(),
+        now_slot,
+        sym_half_life_slots: risk_state.sym_half_life_slots,
+        dir_half_life_slots: risk_state.dir_half_life_slots,
+    });
+
+    emit!(RailsUpdated {
+        market: ctx.accounts.market.key(),
+        shard: shard.key(),
+        now_slot,
+        first_tier_max_notional: rails.tiers[0].max_notional,
+        first_tier_max_oracle_deviation_bps: rails.tiers[0].max_oracle_deviation_bps,
+        second_tier_max_notional: rails.tiers[1].max_notional,
+        second_tier_max_oracle_deviation_bps: rails.tiers[1].max_oracle_deviation_bps,
+        third_tier_max_notional: rails.tiers[2].max_notional,
+        third_tier_max_oracle_deviation_bps: rails.tiers[2].max_oracle_deviation_bps,
     });
 
     Ok(())

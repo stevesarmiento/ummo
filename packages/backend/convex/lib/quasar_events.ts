@@ -49,6 +49,17 @@ export interface CrankEvent {
   advanced: boolean
 }
 
+export interface RiskStateUpdatedEvent {
+  market: string
+  shard: string
+  nowSlot: bigint
+  oraclePrice: bigint
+  riskPrice: bigint
+  emaSymPrice: bigint
+  emaDirDownPrice: bigint
+  emaDirUpPrice: bigint
+}
+
 export interface TradeExecutedEvent {
   market: string
   shard: string
@@ -86,11 +97,104 @@ export interface LiquidationEvent {
   oraclePostedSlot: bigint
 }
 
+export interface LiquidationBountyPaidEvent {
+  market: string
+  shard: string
+  keeper: string
+  liquidateeEngineIndex: number
+  bountyPaid: bigint
+  nowSlot: bigint
+}
+
 export interface MatcherAuthorityUpdatedEvent {
   market: string
   authority: string
   oldMatcherAuthority: string
   newMatcherAuthority: string
+  nowSlot: bigint
+}
+
+export interface FundingRateUpdatedEvent {
+  market: string
+  shard: string
+  nowSlot: bigint
+  oldRateBpsPerSlot: bigint
+  newRateBpsPerSlot: bigint
+  intervalSlots: bigint
+}
+
+export interface RiskConfigUpdatedEvent {
+  market: string
+  shard: string
+  nowSlot: bigint
+  symHalfLifeSlots: bigint
+  dirHalfLifeSlots: bigint
+}
+
+export interface RailsUpdatedEvent {
+  market: string
+  shard: string
+  nowSlot: bigint
+  firstTierMaxNotional: bigint
+  firstTierMaxOracleDeviationBps: number
+  secondTierMaxNotional: bigint
+  secondTierMaxOracleDeviationBps: number
+  thirdTierMaxNotional: bigint
+  thirdTierMaxOracleDeviationBps: number
+}
+
+export interface LiquidationConfigUpdatedEvent {
+  market: string
+  shard: string
+  nowSlot: bigint
+  isEnabled: boolean
+  bountyShareBps: number
+  bountyCapAbs: bigint
+}
+
+export interface FundingPaymentEvent {
+  market: string
+  shard: string
+  trader: string
+  owner: string
+  engineIndex: number
+  nowSlot: bigint
+  deltaFundingPnl: bigint
+  cumulativeFundingPnl: bigint
+}
+
+export interface AccountClosedEvent {
+  market: string
+  shard: string
+  owner: string
+  engineIndex: number
+  amountReturned: bigint
+  nowSlot: bigint
+}
+
+export interface TraderClosedEvent {
+  market: string
+  shard: string
+  trader: string
+  owner: string
+  engineIndex: number
+  amountReturned: bigint
+  nowSlot: bigint
+}
+
+export interface AccountReclaimedEvent {
+  market: string
+  shard: string
+  engineIndex: number
+  dustSwept: bigint
+  nowSlot: bigint
+}
+
+export interface DustGarbageCollectedEvent {
+  market: string
+  shard: string
+  numClosed: number
+  dustSwept: bigint
   nowSlot: bigint
 }
 
@@ -215,6 +319,72 @@ const ANCHOR_DEPOSIT_EVENT_DISCRIMINATOR = createHash("sha256")
   .subarray(0, 8)
 const ANCHOR_DEPOSIT_EVENT_BYTES_LEN = 8 + 32 * 4 + 8 + 2 + 2 + 4
 
+const ANCHOR_CRANK_EVENT_DISCRIMINATOR = createHash("sha256")
+  .update("event:CrankEvent")
+  .digest()
+  .subarray(0, 8)
+const ANCHOR_CRANK_EVENT_BYTES_LEN = 8 + 32 * 2 + 8 + 8 + 1
+
+const ANCHOR_RISK_STATE_UPDATED_DISCRIMINATOR = createHash("sha256")
+  .update("event:RiskStateUpdated")
+  .digest()
+  .subarray(0, 8)
+const ANCHOR_RISK_STATE_UPDATED_BYTES_LEN = 8 + 32 * 2 + 8 * 6
+
+const ANCHOR_RISK_CONFIG_UPDATED_DISCRIMINATOR = createHash("sha256")
+  .update("event:RiskConfigUpdated")
+  .digest()
+  .subarray(0, 8)
+const ANCHOR_RISK_CONFIG_UPDATED_BYTES_LEN = 8 + 32 * 2 + 8 * 3
+
+const ANCHOR_RAILS_UPDATED_DISCRIMINATOR = createHash("sha256")
+  .update("event:RailsUpdated")
+  .digest()
+  .subarray(0, 8)
+const ANCHOR_RAILS_UPDATED_BYTES_LEN = 8 + 32 * 2 + 8 + (8 + 2) * 3
+
+const ANCHOR_LIQUIDATION_CONFIG_UPDATED_DISCRIMINATOR = createHash("sha256")
+  .update("event:LiquidationConfigUpdated")
+  .digest()
+  .subarray(0, 8)
+const ANCHOR_LIQUIDATION_CONFIG_UPDATED_BYTES_LEN = 8 + 32 * 2 + 8 + 1 + 2 + 8
+
+const ANCHOR_FUNDING_PAYMENT_EVENT_DISCRIMINATOR = createHash("sha256")
+  .update("event:FundingPaymentEvent")
+  .digest()
+  .subarray(0, 8)
+const ANCHOR_FUNDING_PAYMENT_EVENT_BYTES_LEN = 8 + 32 * 4 + 2 + 8 * 3
+
+const ANCHOR_ACCOUNT_CLOSED_DISCRIMINATOR = createHash("sha256")
+  .update("event:AccountClosed")
+  .digest()
+  .subarray(0, 8)
+const ANCHOR_ACCOUNT_CLOSED_BYTES_LEN = 8 + 32 * 3 + 2 + 8 + 8
+
+const ANCHOR_TRADER_CLOSED_DISCRIMINATOR = createHash("sha256")
+  .update("event:TraderClosed")
+  .digest()
+  .subarray(0, 8)
+const ANCHOR_TRADER_CLOSED_BYTES_LEN = 8 + 32 * 4 + 2 + 8 + 8
+
+const ANCHOR_ACCOUNT_RECLAIMED_DISCRIMINATOR = createHash("sha256")
+  .update("event:AccountReclaimed")
+  .digest()
+  .subarray(0, 8)
+const ANCHOR_ACCOUNT_RECLAIMED_BYTES_LEN = 8 + 32 * 2 + 2 + 8 + 8
+
+const ANCHOR_DUST_GARBAGE_COLLECTED_DISCRIMINATOR = createHash("sha256")
+  .update("event:DustGarbageCollected")
+  .digest()
+  .subarray(0, 8)
+const ANCHOR_DUST_GARBAGE_COLLECTED_BYTES_LEN = 8 + 32 * 2 + 4 + 8 + 8
+
+const ANCHOR_FUNDING_RATE_UPDATED_DISCRIMINATOR = createHash("sha256")
+  .update("event:FundingRateUpdated")
+  .digest()
+  .subarray(0, 8)
+const ANCHOR_FUNDING_RATE_UPDATED_BYTES_LEN = 8 + 32 * 2 + 8 + 8 + 8 + 8
+
 const ANCHOR_WITHDRAWAL_EVENT_DISCRIMINATOR = createHash("sha256")
   .update("event:WithdrawalEvent")
   .digest()
@@ -226,6 +396,18 @@ const ANCHOR_TRADE_EXECUTED_DISCRIMINATOR = createHash("sha256")
   .digest()
   .subarray(0, 8)
 const ANCHOR_TRADE_EXECUTED_BYTES_LEN = 8 + 32 * 4 + 8 * 5
+
+const ANCHOR_LIQUIDATION_EVENT_DISCRIMINATOR = createHash("sha256")
+  .update("event:LiquidationEvent")
+  .digest()
+  .subarray(0, 8)
+const ANCHOR_LIQUIDATION_EVENT_BYTES_LEN = 8 + 32 * 4 + 2 + 1 + 8 + 8 + 8 + 8
+
+const ANCHOR_LIQUIDATION_BOUNTY_PAID_DISCRIMINATOR = createHash("sha256")
+  .update("event:LiquidationBountyPaid")
+  .digest()
+  .subarray(0, 8)
+const ANCHOR_LIQUIDATION_BOUNTY_PAID_BYTES_LEN = 8 + 32 * 3 + 2 + 8 + 8
 
 const ANCHOR_LP_POOL_INITIALIZED_DISCRIMINATOR = createHash("sha256")
   .update("event:LpPoolInitialized")
@@ -640,16 +822,247 @@ export function parseDepositEvent(bytes: Uint8Array): DepositEvent | null {
 }
 
 export function parseCrankEvent(bytes: Uint8Array): CrankEvent | null {
-  if (bytes.length !== CRANK_BYTES_LEN) return null
-  if (bytes[0] !== CRANK_DISCRIMINATOR) return null
+  if (bytes.length === CRANK_BYTES_LEN && bytes[0] === CRANK_DISCRIMINATOR) {
+    const market = bs58.encode(bytes.slice(1, 33))
+    const shard = bs58.encode(bytes.slice(33, 65))
+    const nowSlot = readU64LE(bytes.slice(65, 73))
+    const lastCrankSlot = readU64LE(bytes.slice(73, 81))
+    const advanced = (bytes[81] ?? 0) !== 0
+    return { market, shard, nowSlot, lastCrankSlot, advanced }
+  }
 
-  const market = bs58.encode(bytes.slice(1, 33))
-  const shard = bs58.encode(bytes.slice(33, 65))
-  const nowSlot = readU64LE(bytes.slice(65, 73))
-  const lastCrankSlot = readU64LE(bytes.slice(73, 81))
-  const advanced = (bytes[81] ?? 0) !== 0
+  if (
+    bytes.length !== ANCHOR_CRANK_EVENT_BYTES_LEN ||
+    !hasPrefix(bytes, ANCHOR_CRANK_EVENT_DISCRIMINATOR)
+  )
+    return null
 
+  const market = bs58.encode(bytes.slice(8, 40))
+  const shard = bs58.encode(bytes.slice(40, 72))
+  const nowSlot = readU64LE(bytes.slice(72, 80))
+  const lastCrankSlot = readU64LE(bytes.slice(80, 88))
+  const advanced = (bytes[88] ?? 0) !== 0
   return { market, shard, nowSlot, lastCrankSlot, advanced }
+}
+
+export function parseRiskStateUpdatedEvent(
+  bytes: Uint8Array,
+): RiskStateUpdatedEvent | null {
+  if (
+    bytes.length !== ANCHOR_RISK_STATE_UPDATED_BYTES_LEN ||
+    !hasPrefix(bytes, ANCHOR_RISK_STATE_UPDATED_DISCRIMINATOR)
+  )
+    return null
+
+  const market = bs58.encode(bytes.slice(8, 40))
+  const shard = bs58.encode(bytes.slice(40, 72))
+  const nowSlot = readU64LE(bytes.slice(72, 80))
+  const oraclePrice = readU64LE(bytes.slice(80, 88))
+  const riskPrice = readU64LE(bytes.slice(88, 96))
+  const emaSymPrice = readU64LE(bytes.slice(96, 104))
+  const emaDirDownPrice = readU64LE(bytes.slice(104, 112))
+  const emaDirUpPrice = readU64LE(bytes.slice(112, 120))
+
+  return {
+    market,
+    shard,
+    nowSlot,
+    oraclePrice,
+    riskPrice,
+    emaSymPrice,
+    emaDirDownPrice,
+    emaDirUpPrice,
+  }
+}
+
+export function parseRiskConfigUpdatedEvent(
+  bytes: Uint8Array,
+): RiskConfigUpdatedEvent | null {
+  if (
+    bytes.length !== ANCHOR_RISK_CONFIG_UPDATED_BYTES_LEN ||
+    !hasPrefix(bytes, ANCHOR_RISK_CONFIG_UPDATED_DISCRIMINATOR)
+  )
+    return null
+
+  const market = bs58.encode(bytes.slice(8, 40))
+  const shard = bs58.encode(bytes.slice(40, 72))
+  const nowSlot = readU64LE(bytes.slice(72, 80))
+  const symHalfLifeSlots = readU64LE(bytes.slice(80, 88))
+  const dirHalfLifeSlots = readU64LE(bytes.slice(88, 96))
+
+  return { market, shard, nowSlot, symHalfLifeSlots, dirHalfLifeSlots }
+}
+
+export function parseRailsUpdatedEvent(bytes: Uint8Array): RailsUpdatedEvent | null {
+  if (
+    bytes.length !== ANCHOR_RAILS_UPDATED_BYTES_LEN ||
+    !hasPrefix(bytes, ANCHOR_RAILS_UPDATED_DISCRIMINATOR)
+  )
+    return null
+
+  const market = bs58.encode(bytes.slice(8, 40))
+  const shard = bs58.encode(bytes.slice(40, 72))
+  const nowSlot = readU64LE(bytes.slice(72, 80))
+  const firstTierMaxNotional = readU64LE(bytes.slice(80, 88))
+  const firstTierMaxOracleDeviationBps = readU16LE(bytes.slice(88, 90))
+  const secondTierMaxNotional = readU64LE(bytes.slice(90, 98))
+  const secondTierMaxOracleDeviationBps = readU16LE(bytes.slice(98, 100))
+  const thirdTierMaxNotional = readU64LE(bytes.slice(100, 108))
+  const thirdTierMaxOracleDeviationBps = readU16LE(bytes.slice(108, 110))
+
+  return {
+    market,
+    shard,
+    nowSlot,
+    firstTierMaxNotional,
+    firstTierMaxOracleDeviationBps,
+    secondTierMaxNotional,
+    secondTierMaxOracleDeviationBps,
+    thirdTierMaxNotional,
+    thirdTierMaxOracleDeviationBps,
+  }
+}
+
+export function parseLiquidationConfigUpdatedEvent(
+  bytes: Uint8Array,
+): LiquidationConfigUpdatedEvent | null {
+  if (
+    bytes.length !== ANCHOR_LIQUIDATION_CONFIG_UPDATED_BYTES_LEN ||
+    !hasPrefix(bytes, ANCHOR_LIQUIDATION_CONFIG_UPDATED_DISCRIMINATOR)
+  )
+    return null
+
+  const market = bs58.encode(bytes.slice(8, 40))
+  const shard = bs58.encode(bytes.slice(40, 72))
+  const nowSlot = readU64LE(bytes.slice(72, 80))
+  const isEnabled = (bytes[80] ?? 0) !== 0
+  const bountyShareBps = readU16LE(bytes.slice(81, 83))
+  const bountyCapAbs = readU64LE(bytes.slice(83, 91))
+
+  return { market, shard, nowSlot, isEnabled, bountyShareBps, bountyCapAbs }
+}
+
+export function parseFundingPaymentEvent(bytes: Uint8Array): FundingPaymentEvent | null {
+  if (
+    bytes.length !== ANCHOR_FUNDING_PAYMENT_EVENT_BYTES_LEN ||
+    !hasPrefix(bytes, ANCHOR_FUNDING_PAYMENT_EVENT_DISCRIMINATOR)
+  )
+    return null
+
+  const market = bs58.encode(bytes.slice(8, 40))
+  const shard = bs58.encode(bytes.slice(40, 72))
+  const trader = bs58.encode(bytes.slice(72, 104))
+  const owner = bs58.encode(bytes.slice(104, 136))
+  const engineIndex = readU16LE(bytes.slice(136, 138))
+  const nowSlot = readU64LE(bytes.slice(138, 146))
+  const deltaFundingPnl = readI64LE(bytes.slice(146, 154))
+  const cumulativeFundingPnl = readI64LE(bytes.slice(154, 162))
+
+  return {
+    market,
+    shard,
+    trader,
+    owner,
+    engineIndex,
+    nowSlot,
+    deltaFundingPnl,
+    cumulativeFundingPnl,
+  }
+}
+
+export function parseAccountClosedEvent(bytes: Uint8Array): AccountClosedEvent | null {
+  if (
+    bytes.length !== ANCHOR_ACCOUNT_CLOSED_BYTES_LEN ||
+    !hasPrefix(bytes, ANCHOR_ACCOUNT_CLOSED_DISCRIMINATOR)
+  )
+    return null
+
+  const market = bs58.encode(bytes.slice(8, 40))
+  const shard = bs58.encode(bytes.slice(40, 72))
+  const owner = bs58.encode(bytes.slice(72, 104))
+  const engineIndex = readU16LE(bytes.slice(104, 106))
+  const amountReturned = readU64LE(bytes.slice(106, 114))
+  const nowSlot = readU64LE(bytes.slice(114, 122))
+
+  return { market, shard, owner, engineIndex, amountReturned, nowSlot }
+}
+
+export function parseTraderClosedEvent(bytes: Uint8Array): TraderClosedEvent | null {
+  if (
+    bytes.length !== ANCHOR_TRADER_CLOSED_BYTES_LEN ||
+    !hasPrefix(bytes, ANCHOR_TRADER_CLOSED_DISCRIMINATOR)
+  )
+    return null
+
+  const market = bs58.encode(bytes.slice(8, 40))
+  const shard = bs58.encode(bytes.slice(40, 72))
+  const trader = bs58.encode(bytes.slice(72, 104))
+  const owner = bs58.encode(bytes.slice(104, 136))
+  const engineIndex = readU16LE(bytes.slice(136, 138))
+  const amountReturned = readU64LE(bytes.slice(138, 146))
+  const nowSlot = readU64LE(bytes.slice(146, 154))
+
+  return { market, shard, trader, owner, engineIndex, amountReturned, nowSlot }
+}
+
+export function parseAccountReclaimedEvent(bytes: Uint8Array): AccountReclaimedEvent | null {
+  if (
+    bytes.length !== ANCHOR_ACCOUNT_RECLAIMED_BYTES_LEN ||
+    !hasPrefix(bytes, ANCHOR_ACCOUNT_RECLAIMED_DISCRIMINATOR)
+  )
+    return null
+
+  const market = bs58.encode(bytes.slice(8, 40))
+  const shard = bs58.encode(bytes.slice(40, 72))
+  const engineIndex = readU16LE(bytes.slice(72, 74))
+  const dustSwept = readU64LE(bytes.slice(74, 82))
+  const nowSlot = readU64LE(bytes.slice(82, 90))
+
+  return { market, shard, engineIndex, dustSwept, nowSlot }
+}
+
+export function parseDustGarbageCollectedEvent(
+  bytes: Uint8Array,
+): DustGarbageCollectedEvent | null {
+  if (
+    bytes.length !== ANCHOR_DUST_GARBAGE_COLLECTED_BYTES_LEN ||
+    !hasPrefix(bytes, ANCHOR_DUST_GARBAGE_COLLECTED_DISCRIMINATOR)
+  )
+    return null
+
+  const market = bs58.encode(bytes.slice(8, 40))
+  const shard = bs58.encode(bytes.slice(40, 72))
+  const numClosed = readU32LE(bytes.slice(72, 76))
+  const dustSwept = readU64LE(bytes.slice(76, 84))
+  const nowSlot = readU64LE(bytes.slice(84, 92))
+
+  return { market, shard, numClosed, dustSwept, nowSlot }
+}
+
+export function parseFundingRateUpdatedEvent(
+  bytes: Uint8Array,
+): FundingRateUpdatedEvent | null {
+  if (
+    bytes.length !== ANCHOR_FUNDING_RATE_UPDATED_BYTES_LEN ||
+    !hasPrefix(bytes, ANCHOR_FUNDING_RATE_UPDATED_DISCRIMINATOR)
+  )
+    return null
+
+  const market = bs58.encode(bytes.slice(8, 40))
+  const shard = bs58.encode(bytes.slice(40, 72))
+  const nowSlot = readU64LE(bytes.slice(72, 80))
+  const oldRateBpsPerSlot = readI64LE(bytes.slice(80, 88))
+  const newRateBpsPerSlot = readI64LE(bytes.slice(88, 96))
+  const intervalSlots = readU64LE(bytes.slice(96, 104))
+
+  return {
+    market,
+    shard,
+    nowSlot,
+    oldRateBpsPerSlot,
+    newRateBpsPerSlot,
+    intervalSlots,
+  }
 }
 
 export function parseTradeExecutedEvent(
@@ -763,19 +1176,48 @@ export function parseWithdrawalEvent(bytes: Uint8Array): WithdrawalEvent | null 
 }
 
 export function parseLiquidationEvent(bytes: Uint8Array): LiquidationEvent | null {
-  if (bytes.length !== LIQUIDATION_BYTES_LEN) return null
-  if (bytes[0] !== LIQUIDATION_DISCRIMINATOR) return null
+  if (bytes.length === LIQUIDATION_BYTES_LEN && bytes[0] === LIQUIDATION_DISCRIMINATOR) {
+    const market = bs58.encode(bytes.slice(1, 33))
+    const shard = bs58.encode(bytes.slice(33, 65))
+    const keeper = bs58.encode(bytes.slice(65, 97))
+    const liquidateeOwner = bs58.encode(bytes.slice(97, 129))
+    const liquidateeEngineIndex = readU16LE(bytes.slice(129, 131))
+    const liquidated = (bytes[131] ?? 0) !== 0
+    const oldEffectivePosQ = readI64LE(bytes.slice(137, 145))
+    const nowSlot = readU64LE(bytes.slice(145, 153))
+    const oraclePrice = readU64LE(bytes.slice(153, 161))
+    const oraclePostedSlot = readU64LE(bytes.slice(161, 169))
 
-  const market = bs58.encode(bytes.slice(1, 33))
-  const shard = bs58.encode(bytes.slice(33, 65))
-  const keeper = bs58.encode(bytes.slice(65, 97))
-  const liquidateeOwner = bs58.encode(bytes.slice(97, 129))
-  const liquidateeEngineIndex = readU16LE(bytes.slice(129, 131))
-  const liquidated = (bytes[131] ?? 0) !== 0
-  const oldEffectivePosQ = readI64LE(bytes.slice(137, 145))
-  const nowSlot = readU64LE(bytes.slice(145, 153))
-  const oraclePrice = readU64LE(bytes.slice(153, 161))
-  const oraclePostedSlot = readU64LE(bytes.slice(161, 169))
+    return {
+      market,
+      shard,
+      keeper,
+      liquidateeOwner,
+      liquidateeEngineIndex,
+      liquidated,
+      oldEffectivePosQ,
+      nowSlot,
+      oraclePrice,
+      oraclePostedSlot,
+    }
+  }
+
+  if (
+    bytes.length !== ANCHOR_LIQUIDATION_EVENT_BYTES_LEN ||
+    !hasPrefix(bytes, ANCHOR_LIQUIDATION_EVENT_DISCRIMINATOR)
+  )
+    return null
+
+  const market = bs58.encode(bytes.slice(8, 40))
+  const shard = bs58.encode(bytes.slice(40, 72))
+  const keeper = bs58.encode(bytes.slice(72, 104))
+  const liquidateeOwner = bs58.encode(bytes.slice(104, 136))
+  const liquidateeEngineIndex = readU16LE(bytes.slice(136, 138))
+  const liquidated = (bytes[138] ?? 0) !== 0
+  const oldEffectivePosQ = readI64LE(bytes.slice(139, 147))
+  const nowSlot = readU64LE(bytes.slice(147, 155))
+  const oraclePrice = readU64LE(bytes.slice(155, 163))
+  const oraclePostedSlot = readU64LE(bytes.slice(163, 171))
 
   return {
     market,
@@ -788,6 +1230,32 @@ export function parseLiquidationEvent(bytes: Uint8Array): LiquidationEvent | nul
     nowSlot,
     oraclePrice,
     oraclePostedSlot,
+  }
+}
+
+export function parseLiquidationBountyPaidEvent(
+  bytes: Uint8Array,
+): LiquidationBountyPaidEvent | null {
+  if (
+    bytes.length !== ANCHOR_LIQUIDATION_BOUNTY_PAID_BYTES_LEN ||
+    !hasPrefix(bytes, ANCHOR_LIQUIDATION_BOUNTY_PAID_DISCRIMINATOR)
+  )
+    return null
+
+  const market = bs58.encode(bytes.slice(8, 40))
+  const shard = bs58.encode(bytes.slice(40, 72))
+  const keeper = bs58.encode(bytes.slice(72, 104))
+  const liquidateeEngineIndex = readU16LE(bytes.slice(104, 106))
+  const bountyPaid = readU64LE(bytes.slice(106, 114))
+  const nowSlot = readU64LE(bytes.slice(114, 122))
+
+  return {
+    market,
+    shard,
+    keeper,
+    liquidateeEngineIndex,
+    bountyPaid,
+    nowSlot,
   }
 }
 

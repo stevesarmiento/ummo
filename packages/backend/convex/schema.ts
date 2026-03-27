@@ -43,6 +43,27 @@ export default defineSchema({
     houseEngineIndex: v.number(),
     createdAtSlot: v.int64(),
     lastCrankSlot: v.int64(),
+    riskUpdatedAtSlot: v.optional(v.int64()),
+    oraclePrice: v.optional(v.int64()),
+    riskPrice: v.optional(v.int64()),
+    emaSymPrice: v.optional(v.int64()),
+    emaDirDownPrice: v.optional(v.int64()),
+    emaDirUpPrice: v.optional(v.int64()),
+    riskSymHalfLifeSlots: v.optional(v.int64()),
+    riskDirHalfLifeSlots: v.optional(v.int64()),
+    railsUpdatedAtSlot: v.optional(v.int64()),
+    railsFirstTierMaxNotional: v.optional(v.int64()),
+    railsFirstTierMaxOracleDeviationBps: v.optional(v.number()),
+    railsSecondTierMaxNotional: v.optional(v.int64()),
+    railsSecondTierMaxOracleDeviationBps: v.optional(v.number()),
+    railsThirdTierMaxNotional: v.optional(v.int64()),
+    railsThirdTierMaxOracleDeviationBps: v.optional(v.number()),
+    liquidationConfigUpdatedAtSlot: v.optional(v.int64()),
+    liquidationBountyIsEnabled: v.optional(v.boolean()),
+    liquidationBountyShareBps: v.optional(v.number()),
+    liquidationBountyCapAbs: v.optional(v.int64()),
+    fundingUpdatedAtSlot: v.optional(v.int64()),
+    fundingRateBpsPerSlot: v.optional(v.int64()),
     indexedAt: v.number(),
   })
     .index("by_shard", ["shard"])
@@ -222,7 +243,8 @@ export default defineSchema({
     .index("by_signature", ["signature"])
     .index("by_trader", ["trader"])
     .index("by_owner", ["owner"])
-    .index("by_owner_market", ["owner", "market"]),
+    .index("by_owner_market", ["owner", "market"])
+    .index("by_shard_now_slot", ["shard", "nowSlot"]),
 
   positionsView: defineTable({
     market: v.string(),
@@ -261,6 +283,34 @@ export default defineSchema({
     .index("by_owner", ["owner"])
     .index("by_owner_market", ["owner", "market"]),
 
+  housekeepingEvents: defineTable({
+    eventKey: v.string(),
+    signature: v.string(),
+    slot: v.int64(),
+    market: v.string(),
+    shard: v.string(),
+    kind: v.union(
+      v.literal("accountClosed"),
+      v.literal("traderClosed"),
+      v.literal("accountReclaimed"),
+      v.literal("dustGarbageCollected"),
+    ),
+    owner: v.optional(v.string()),
+    trader: v.optional(v.string()),
+    engineIndex: v.optional(v.number()),
+    amountReturned: v.optional(v.int64()),
+    dustSwept: v.optional(v.int64()),
+    numClosed: v.optional(v.number()),
+    nowSlot: v.int64(),
+    indexedAt: v.number(),
+  })
+    .index("by_event_key", ["eventKey"])
+    .index("by_signature", ["signature"])
+    .index("by_shard", ["shard"])
+    .index("by_owner", ["owner"])
+    .index("by_kind", ["kind"])
+    .index("by_indexedAt", ["indexedAt"]),
+
   liquidations: defineTable({
     signature: v.string(),
     slot: v.int64(),
@@ -274,11 +324,51 @@ export default defineSchema({
     nowSlot: v.int64(),
     oraclePrice: v.int64(),
     oraclePostedSlot: v.int64(),
+    bountyPaid: v.optional(v.int64()),
     indexedAt: v.number(),
   })
     .index("by_signature", ["signature"])
     .index("by_owner", ["liquidateeOwner"])
     .index("by_owner_market", ["liquidateeOwner", "market"]),
+
+  fundingUpdates: defineTable({
+    signature: v.string(),
+    slot: v.int64(),
+    market: v.string(),
+    shard: v.string(),
+    nowSlot: v.int64(),
+    oldRateBpsPerSlot: v.int64(),
+    newRateBpsPerSlot: v.int64(),
+    intervalSlots: v.int64(),
+    indexedAt: v.number(),
+  })
+    .index("by_signature", ["signature"])
+    .index("by_shard", ["shard"])
+    .index("by_market", ["market"]),
+
+  fundingPayments: defineTable({
+    signature: v.string(),
+    slot: v.int64(),
+    market: v.string(),
+    shard: v.string(),
+    trader: v.string(),
+    owner: v.string(),
+    engineIndex: v.number(),
+    nowSlot: v.int64(),
+    deltaFundingPnl: v.int64(),
+    cumulativeFundingPnl: v.int64(),
+    indexedAt: v.number(),
+  })
+    .index("by_signature", ["signature"])
+    .index("by_owner", ["owner"])
+    .index("by_owner_and_market_and_shard", ["owner", "market", "shard"])
+    .index("by_owner_and_market_and_shard_and_nowSlot", [
+      "owner",
+      "market",
+      "shard",
+      "nowSlot",
+    ])
+    .index("by_shard", ["shard"]),
 
   quoteAnalytics: defineTable({
     market: v.string(),

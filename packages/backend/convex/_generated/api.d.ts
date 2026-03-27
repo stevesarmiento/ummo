@@ -10,6 +10,10 @@
 
 import type * as activity from "../activity.js";
 import type * as cranks from "../cranks.js";
+import type * as fundingPayments from "../fundingPayments.js";
+import type * as fundingSuggestions from "../fundingSuggestions.js";
+import type * as fundingUpdates from "../fundingUpdates.js";
+import type * as housekeeping from "../housekeeping.js";
 import type * as http from "../http.js";
 import type * as indexer from "../indexer.js";
 import type * as lib_pyth_receiver from "../lib/pyth_receiver.js";
@@ -26,6 +30,9 @@ import type * as markets from "../markets.js";
 import type * as matcher from "../matcher.js";
 import type * as matcherErrors from "../matcherErrors.js";
 import type * as ops from "../ops.js";
+import type * as opsDebug from "../opsDebug.js";
+import type * as opsMatcherErrors from "../opsMatcherErrors.js";
+import type * as opsSnapshot from "../opsSnapshot.js";
 import type * as positions from "../positions.js";
 import type * as quoteAnalytics from "../quoteAnalytics.js";
 import type * as shards from "../shards.js";
@@ -43,6 +50,10 @@ import type {
 declare const fullApi: ApiFromModules<{
   activity: typeof activity;
   cranks: typeof cranks;
+  fundingPayments: typeof fundingPayments;
+  fundingSuggestions: typeof fundingSuggestions;
+  fundingUpdates: typeof fundingUpdates;
+  housekeeping: typeof housekeeping;
   http: typeof http;
   indexer: typeof indexer;
   "lib/pyth_receiver": typeof lib_pyth_receiver;
@@ -59,6 +70,9 @@ declare const fullApi: ApiFromModules<{
   matcher: typeof matcher;
   matcherErrors: typeof matcherErrors;
   ops: typeof ops;
+  opsDebug: typeof opsDebug;
+  opsMatcherErrors: typeof opsMatcherErrors;
+  opsSnapshot: typeof opsSnapshot;
   positions: typeof positions;
   quoteAnalytics: typeof quoteAnalytics;
   shards: typeof shards;

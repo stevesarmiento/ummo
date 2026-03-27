@@ -29,6 +29,7 @@ export const applyLiquidationEvent = mutationGeneric({
     nowSlot: v.int64(),
     oraclePrice: v.int64(),
     oraclePostedSlot: v.int64(),
+    bountyPaid: v.optional(v.int64()),
   },
   handler: async (ctx, args) => {
     const existing = await ctx.db
@@ -52,6 +53,7 @@ export const applyLiquidationEvent = mutationGeneric({
       nowSlot: args.nowSlot,
       oraclePrice: args.oraclePrice,
       oraclePostedSlot: args.oraclePostedSlot,
+      ...(args.bountyPaid !== undefined ? { bountyPaid: args.bountyPaid } : {}),
       indexedAt,
     })
 
@@ -96,6 +98,24 @@ export const applyLiquidationEvent = mutationGeneric({
 
     await ctx.db.insert("positionsView", patch)
     return liquidationId
+  },
+})
+
+export const applyLiquidationBountyPaidEvent = mutationGeneric({
+  args: {
+    signature: v.string(),
+    bountyPaid: v.int64(),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("liquidations")
+      .withIndex("by_signature", (q) => q.eq("signature", args.signature))
+      .unique()
+
+    if (!existing) return null
+
+    await ctx.db.patch(existing._id, { bountyPaid: args.bountyPaid })
+    return existing._id
   },
 })
 

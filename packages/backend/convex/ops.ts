@@ -1,7 +1,14 @@
-import { actionGeneric, makeFunctionReference, queryGeneric } from "convex/server"
+"use node"
+
+import { actionGeneric, makeFunctionReference } from "convex/server"
 import { v } from "convex/values"
 
-const MAX_CRANK_STALENESS_SLOTS = 100_000_000n
+import { getOraclePrice1e6FromPriceUpdateV2Bytes } from "./lib/pyth_receiver"
+import { decodeBase64 } from "./lib/quasar_events"
+
+const MAX_CRANK_STALENESS_SLOTS = 150n
+const MAX_ORACLE_STALENESS_SLOTS = 10_000n
+const MAX_ORACLE_CONFIDENCE_BPS = 200n
 
 interface MarketRow {
   market: string
@@ -61,7 +68,7 @@ interface Snapshot {
   quoteAnalytics: QuoteAnalyticsRow[]
 }
 
-const getSnapshotRef = makeFunctionReference<"query">("ops:getSnapshot")
+const getSnapshotRef = makeFunctionReference<"query">("opsSnapshot:getSnapshot")
 const listRecentMatcherErrors = makeFunctionReference<"query">(
   "matcherErrors:listRecent",
 )
@@ -95,29 +102,23 @@ async function getNowSlot(rpcUrl: string): Promise<bigint> {
   return BigInt(slot)
 }
 
-export const getRecentMatcherErrors = queryGeneric({
-  args: { limit: v.optional(v.number()) },
-  handler: async (ctx, args) => {
-    const rows = (await ctx.db.query("matcherErrors").collect()) as MatcherErrorRow[]
-    rows.sort((a, b) => b.indexedAt - a.indexedAt)
-    return rows.slice(0, args.limit ?? 25)
-  },
-})
+async function getAccountDataBase64(rpcUrl: string, address: string): Promise<string> {
+  const result = await rpcCall<{
+    value: { data: [string, string] } | null
+  }>({
+    rpcUrl,
+    method: "getAccountInfo",
+    params: [address, { encoding: "base64" }],
+  })
 
-export const getSnapshot = queryGeneric({
-  args: {},
-  handler: async (ctx) => {
-    const [markets, shards, liquidations, trades, quoteAnalytics] = await Promise.all([
-      ctx.db.query("markets").collect() as Promise<MarketRow[]>,
-      ctx.db.query("shards").collect() as Promise<ShardRow[]>,
-      ctx.db.query("liquidations").collect() as Promise<LiquidationRow[]>,
-      ctx.db.query("trades").collect() as Promise<TradeRow[]>,
-      ctx.db.query("quoteAnalytics").collect() as Promise<QuoteAnalyticsRow[]>,
-    ])
+  const value = result.value
+  if (!value) throw new Error("Account not found")
 
-    return { markets, shards, liquidations, trades, quoteAnalytics }
-  },
-})
+  const data = value.data
+  const base64 = data[0]
+  if (!base64) throw new Error("Account had empty data")
+  return base64
+}
 
 export const getDashboard = actionGeneric({
   args: { rpcUrl: v.optional(v.string()) },
@@ -165,12 +166,82 @@ export const getDashboard = actionGeneric({
       if (quote.usedFallback) fallbackQuotes24h += 1
     }
 
+    const oracleByFeed = new Map<
+      string,
+      | {
+          ok: true
+          price: bigint
+          conf: bigint
+          postedSlot: bigint
+          stalenessSlots: bigint
+          maxConf: bigint
+          isStale: boolean
+          isConfTooWide: boolean
+        }
+      | { ok: false; error: string }
+    >()
+
+    async function getOracleHealth(oracleFeed: string) {
+      const existing = oracleByFeed.get(oracleFeed)
+      if (existing) return existing
+
+      try {
+        const base64 = await getAccountDataBase64(rpcUrl, oracleFeed)
+        const bytes = decodeBase64(base64)
+        const parsed = getOraclePrice1e6FromPriceUpdateV2Bytes(bytes)
+        if (!parsed) throw new Error("Invalid PriceUpdateV2 account data")
+
+        const stalenessSlots = nowSlot - parsed.postedSlot
+        const isStale =
+          stalenessSlots < 0n || stalenessSlots > MAX_ORACLE_STALENESS_SLOTS
+        const maxConf = (parsed.price * MAX_ORACLE_CONFIDENCE_BPS) / 10_000n
+        const isConfTooWide = parsed.conf > maxConf
+
+        const out = {
+          ok: true as const,
+          price: parsed.price,
+          conf: parsed.conf,
+          postedSlot: parsed.postedSlot,
+          stalenessSlots,
+          maxConf,
+          isStale,
+          isConfTooWide,
+        }
+        oracleByFeed.set(oracleFeed, out)
+        return out
+      } catch (error) {
+        const out = {
+          ok: false as const,
+          error: error instanceof Error ? error.message : "Unknown oracle fetch error",
+        }
+        oracleByFeed.set(oracleFeed, out)
+        return out
+      }
+    }
+
+    const marketByKey = new Map(markets.map((m) => [m.market, m] as const))
+    await Promise.all(markets.map((m) => getOracleHealth(m.oracleFeed)))
+
     const shardRows = shards
       .map((s) => {
         const lastCrankSlot = BigInt(s.lastCrankSlot)
-        const stalenessSlots = nowSlot - lastCrankSlot
-        const isStale = stalenessSlots < 0n || stalenessSlots > MAX_CRANK_STALENESS_SLOTS
+        const crankStalenessSlots = nowSlot - lastCrankSlot
+        const isCrankStale =
+          crankStalenessSlots < 0n || crankStalenessSlots > MAX_CRANK_STALENESS_SLOTS
         const key = `${s.market}:${s.shard}`
+
+        const market = marketByKey.get(s.market) ?? null
+        const oracle =
+          market?.oracleFeed ? oracleByFeed.get(market.oracleFeed) ?? null : null
+
+        const oraclePostedSlot =
+          oracle && oracle.ok ? oracle.postedSlot.toString(10) : null
+        const oracleStalenessSlots =
+          oracle && oracle.ok
+            ? oracle.stalenessSlots < 0n
+              ? "0"
+              : oracle.stalenessSlots.toString(10)
+            : null
 
         return {
           market: s.market,
@@ -178,8 +249,18 @@ export const getDashboard = actionGeneric({
           shardId: s.shardId,
           shardSeed: s.shardSeed,
           lastCrankSlot: lastCrankSlot.toString(10),
-          stalenessSlots: stalenessSlots < 0n ? "0" : stalenessSlots.toString(10),
-          isStale,
+          crankStalenessSlots:
+            crankStalenessSlots < 0n ? "0" : crankStalenessSlots.toString(10),
+          isCrankStale,
+          oracleFeed: market?.oracleFeed ?? null,
+          oraclePrice: oracle && oracle.ok ? oracle.price.toString(10) : null,
+          oracleConf: oracle && oracle.ok ? oracle.conf.toString(10) : null,
+          oracleMaxConf: oracle && oracle.ok ? oracle.maxConf.toString(10) : null,
+          oraclePostedSlot,
+          oracleStalenessSlots,
+          isOracleStale: oracle && oracle.ok ? oracle.isStale : true,
+          isOracleConfTooWide: oracle && oracle.ok ? oracle.isConfTooWide : true,
+          oracleError: oracle && !oracle.ok ? oracle.error : null,
           liquidations24h: liqCountsByShard.get(key) ?? 0,
           trades24h: tradeCountsByShard.get(key) ?? 0,
           indexedAt: s.indexedAt,
@@ -193,6 +274,8 @@ export const getDashboard = actionGeneric({
       rpcUrl,
       nowSlot: nowSlot.toString(10),
       maxCrankStalenessSlots: MAX_CRANK_STALENESS_SLOTS.toString(10),
+      maxOracleStalenessSlots: MAX_ORACLE_STALENESS_SLOTS.toString(10),
+      maxOracleConfidenceBps: MAX_ORACLE_CONFIDENCE_BPS.toString(10),
       quoteAnalytics: {
         quotes24h,
         fallbackQuotes24h,
@@ -224,66 +307,3 @@ export const getDashboard = actionGeneric({
     }
   },
 })
-
-const getTraderViewByOwnerMarketShard = makeFunctionReference<"query">(
-  "traderViews:getByOwnerMarketShard",
-)
-const getActivityByOwnerMarketShard = makeFunctionReference<"query">(
-  "activity:getByOwnerMarketShard",
-)
-
-export const debugGetDocById = queryGeneric({
-  args: { id: v.string() },
-  handler: async (ctx, args) => {
-    const doc = await ctx.db.get(args.id as never)
-    return { id: args.id, doc }
-  },
-})
-
-export const debugGetTraderBundleById = queryGeneric({
-  args: { id: v.string(), limit: v.optional(v.number()) },
-  handler: async (ctx, args) => {
-    const doc = (await ctx.db.get(args.id as never)) as
-      | null
-      | {
-          owner?: unknown
-          market?: unknown
-          shard?: unknown
-          trader?: unknown
-        }
-
-    if (!doc) return { id: args.id, found: false as const }
-
-    const owner = typeof doc.owner === "string" ? doc.owner : null
-    const market = typeof doc.market === "string" ? doc.market : null
-    const shard = typeof doc.shard === "string" ? doc.shard : null
-
-    if (!owner || !market || !shard) {
-      return {
-        id: args.id,
-        found: true as const,
-        doc,
-        bundle: null,
-        reason: "Document is not a trader-shaped row (missing owner/market/shard).",
-      }
-    }
-
-    const [traderView, activity] = await Promise.all([
-      ctx.runQuery(getTraderViewByOwnerMarketShard, { owner, market, shard }),
-      ctx.runQuery(getActivityByOwnerMarketShard, {
-        owner,
-        market,
-        shard,
-        limit: args.limit ?? 50,
-      }),
-    ])
-
-    return {
-      id: args.id,
-      found: true as const,
-      doc,
-      bundle: { owner, market, shard, traderView, activity },
-    }
-  },
-})
-

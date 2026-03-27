@@ -18,8 +18,17 @@ interface OpsShardRow {
   shardId: number
   shardSeed: string
   lastCrankSlot: string
-  stalenessSlots: string
-  isStale: boolean
+  crankStalenessSlots: string
+  isCrankStale: boolean
+  oracleFeed: string | null
+  oraclePrice: string | null
+  oracleConf: string | null
+  oracleMaxConf: string | null
+  oraclePostedSlot: string | null
+  oracleStalenessSlots: string | null
+  isOracleStale: boolean
+  isOracleConfTooWide: boolean
+  oracleError: string | null
   liquidations24h: number
   trades24h: number
   indexedAt: number
@@ -38,6 +47,8 @@ interface OpsDashboard {
   rpcUrl: string
   nowSlot: string
   maxCrankStalenessSlots: string
+  maxOracleStalenessSlots: string
+  maxOracleConfidenceBps: string
   quoteAnalytics: {
     quotes24h: number
     fallbackQuotes24h: number
@@ -72,6 +83,11 @@ export default async function OpsPage() {
         <div>
           Hard stale threshold:{" "}
           <span className="font-mono">{dashboard.maxCrankStalenessSlots}</span> slots
+        </div>
+        <div>
+          Oracle stale threshold:{" "}
+          <span className="font-mono">{dashboard.maxOracleStalenessSlots}</span> slots • max conf{" "}
+          <span className="font-mono">{dashboard.maxOracleConfidenceBps}</span> bps
         </div>
       </div>
 
@@ -116,6 +132,9 @@ export default async function OpsPage() {
                   <th className="py-2 pr-4">Shard</th>
                   <th className="py-2 pr-4">Last crank</th>
                   <th className="py-2 pr-4">Staleness</th>
+                  <th className="py-2 pr-4">Oracle</th>
+                  <th className="py-2 pr-4">Oracle staleness</th>
+                  <th className="py-2 pr-4">Oracle conf</th>
                   <th className="py-2 pr-4">24h liq</th>
                   <th className="py-2 pr-4">24h trades</th>
                 </tr>
@@ -139,17 +158,78 @@ export default async function OpsPage() {
                     </td>
                     <td className="py-2 pr-4">
                       <div className="flex items-center gap-2">
-                        <span className="font-mono">{s.stalenessSlots}</span>
-                        {s.isStale ? (
+                        <span className="font-mono">{s.crankStalenessSlots}</span>
+                        {s.isCrankStale ? (
                           <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-900 dark:bg-amber-950 dark:text-amber-200">
-                            Stale
+                            Crank stale
                           </span>
                         ) : (
                           <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200">
-                            Fresh
+                            Crank fresh
                           </span>
                         )}
                       </div>
+                    </td>
+                    <td className="py-2 pr-4">
+                      {s.oracleError ? (
+                        <span className="font-mono text-[11px] text-rose-600 dark:text-rose-300">
+                          err
+                        </span>
+                      ) : s.oraclePostedSlot ? (
+                        <div className="flex flex-col">
+                          <span className="font-mono">{s.oraclePostedSlot}</span>
+                          {s.oraclePrice ? (
+                            <span className="font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
+                              {formatFixedDecimal(toBigInt(s.oraclePrice) ?? 0n, 6)} USD
+                            </span>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <span className="text-zinc-500 dark:text-zinc-400">—</span>
+                      )}
+                    </td>
+                    <td className="py-2 pr-4">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono">{s.oracleStalenessSlots ?? "—"}</span>
+                        {s.oracleError ? (
+                          <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-medium text-rose-900 dark:bg-rose-950 dark:text-rose-200">
+                            Oracle error
+                          </span>
+                        ) : s.isOracleStale ? (
+                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+                            Oracle stale
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200">
+                            Oracle ok
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="py-2 pr-4">
+                      {s.oracleError ? (
+                        <span className="text-zinc-500 dark:text-zinc-400">—</span>
+                      ) : s.oracleConf && s.oracleMaxConf ? (
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono">
+                            {formatFixedDecimal(toBigInt(s.oracleConf) ?? 0n, 6)}
+                          </span>
+                          <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                            / {formatFixedDecimal(toBigInt(s.oracleMaxConf) ?? 0n, 6)}
+                          </span>
+                          {s.isOracleConfTooWide ? (
+                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+                              Wide
+                            </span>
+                          ) : (
+                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200">
+                              Ok
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-zinc-500 dark:text-zinc-400">—</span>
+                      )}
                     </td>
                     <td className="py-2 pr-4">
                       <span className="font-mono">{s.liquidations24h}</span>

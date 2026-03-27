@@ -13,10 +13,12 @@ import {
   getAssociatedTokenAddress,
   getDepositLpInstruction,
   getEngineAddress,
+  getKeeperCrankInstruction,
   getInitLpPoolInstruction,
   getLpBandConfigAddress,
   getLpPoolAddress,
   getLpPositionAddress,
+  getRiskStateAddress,
   getRequestLpWithdrawInstruction,
   getSetLpBandConfigInstruction,
 } from "@ummo/sdk"
@@ -29,7 +31,7 @@ import {
   parseFixedDecimal,
   toBigInt,
 } from "@/lib/market-format"
-import { convexQuery } from "@/lib/convex-http"
+import { convexAction, convexQuery } from "@/lib/convex-http"
 
 import {
   getCreateAssociatedTokenAccountInstruction,
@@ -139,11 +141,13 @@ export function LpMarketClient(props: LpMarketClientProps) {
 
   const [derived, setDerived] = useState<{
     engine: string | null
+    riskState: string | null
     lpPool: string | null
     lpPosition: string | null
     lpBandConfig: string | null
   }>({
     engine: null,
+    riskState: null,
     lpPool: null,
     lpPosition: null,
     lpBandConfig: null,
@@ -173,6 +177,7 @@ export function LpMarketClient(props: LpMarketClientProps) {
       if (!shardAddress) {
         setDerived({
           engine: null,
+          riskState: null,
           lpPool: null,
           lpPosition: null,
           lpBandConfig: null,
@@ -180,10 +185,14 @@ export function LpMarketClient(props: LpMarketClientProps) {
         return
       }
 
-      const engine = await getEngineAddress({ shard: shardAddress })
-      const lpPoolAddress = await getLpPoolAddress({ shard: shardAddress })
+      const [engine, riskState, lpPoolAddress] = await Promise.all([
+        getEngineAddress({ shard: shardAddress }),
+        getRiskStateAddress({ shard: shardAddress }),
+        getLpPoolAddress({ shard: shardAddress }),
+      ])
       const nextDerived = {
         engine,
+        riskState,
         lpPool: lpPoolAddress,
         lpPosition:
           ownerAddress != null
@@ -586,6 +595,7 @@ export function LpMarketClient(props: LpMarketClientProps) {
       !ownerAddress ||
       !shardAddress ||
       !derived.engine ||
+      !derived.riskState ||
       !derived.lpPool ||
       !derived.lpPosition
     )
@@ -636,12 +646,39 @@ export function LpMarketClient(props: LpMarketClientProps) {
           }),
         )
       }
+
+      // Claiming an LP withdrawal calls into the risk engine `withdraw`, which is
+      // freshness-gated. Always bundle a minimal freshen step first.
+      const quote = await convexAction<{
+        nowSlot: string
+        oraclePrice: string
+      }>("matcher:getQuote", {
+        oracleFeed: oracleFeedAddress,
+        rpcUrl,
+      })
+      const oraclePrice = toBigInt(quote.oraclePrice)
+      if (!oraclePrice) throw new Error("Matcher returned an invalid oracle price")
+      instructions.push(
+        getKeeperCrankInstruction({
+          keeper: ownerAddress,
+          oracleFeed: oracleFeedAddress,
+          market: marketAddress,
+          shard: shardAddress,
+          riskState: address(derived.riskState),
+          engine: address(derived.engine),
+          nowSlot: toBigInt(quote.nowSlot) ?? 0n,
+          oraclePrice,
+          orderedCandidates: [],
+          maxRevalidations: 0,
+        }),
+      )
       instructions.push(
         getClaimLpWithdrawInstruction({
           owner: ownerAddress,
           oracleFeed: oracleFeedAddress,
           market: marketAddress,
           shard: shardAddress,
+          riskState: address(derived.riskState),
           engine: address(derived.engine),
           lpPool: address(derived.lpPool),
           lpPosition: address(derived.lpPosition),
@@ -664,6 +701,7 @@ export function LpMarketClient(props: LpMarketClientProps) {
     client,
     collateralMintAddress,
     derived.engine,
+    derived.riskState,
     derived.lpPool,
     derived.lpPosition,
     marketAddress,

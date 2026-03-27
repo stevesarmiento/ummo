@@ -13,10 +13,16 @@ import {
   getDepositInstruction,
   getEngineAddress,
   getExecuteTradeInstruction,
+  getFundingAccumulatorAddress,
   getKeeperCrankInstruction,
   getLpPoolAddress,
+  getMatcherAllowlistAddress,
   getOpenTraderInstruction,
+  getRailsAddress,
+  getRiskStateAddress,
+  getTouchTraderFundingInstruction,
   getTraderAddress,
+  getTraderFundingStateAddress,
   getWithdrawInstruction,
 } from "@ummo/sdk"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@ummo/ui/tabs"
@@ -55,6 +61,14 @@ function isOracleStalenessError(message: string): boolean {
   return (
     lower.includes("oracle is stale") ||
     lower.includes("too close to staleness cutoff")
+  )
+}
+
+function isInstructionFallbackNotFoundError(message: string): boolean {
+  const lower = message.toLowerCase()
+  return (
+    lower.includes("instructionfallbacknotfound") ||
+    lower.includes("fallback functions are not supported")
   )
 }
 
@@ -131,13 +145,49 @@ interface TraderViewData {
         amount: string
       }
     | {
+        type: "FundingPayment"
+        signature: string
+        slot: string
+        indexedAt: number
+        deltaFundingPnl: string
+        cumulativeFundingPnl: string
+      }
+    | {
         type: "Liquidation"
         signature: string
         slot: string
         indexedAt: number
         liquidated: boolean
       }
+    | {
+        type: "TraderClosed"
+        signature: string
+        slot: string
+        indexedAt: number
+        amountReturned: string
+      }
+    | {
+        type: "AccountClosed"
+        signature: string
+        slot: string
+        indexedAt: number
+        engineIndex: number
+        amountReturned: string
+      }
   >
+}
+
+interface ShardDoc {
+  shard: string
+  lastCrankSlot: unknown
+  riskUpdatedAtSlot?: unknown
+  oraclePrice?: unknown
+  riskPrice?: unknown
+  emaSymPrice?: unknown
+  emaDirDownPrice?: unknown
+  emaDirUpPrice?: unknown
+  fundingUpdatedAtSlot?: unknown
+  fundingRateBpsPerSlot?: unknown
 }
 
 interface CollateralPreview {
@@ -211,10 +261,14 @@ export function TraderMarketClient(props: TraderMarketClientProps) {
 
   const [derived, setDerived] = useState<{
     engine: string | null
+    riskState: string | null
+    rails: string | null
     lpPool: string | null
     trader: string | null
   }>({
     engine: null,
+    riskState: null,
+    rails: null,
     lpPool: null,
     trader: null,
   })
@@ -233,6 +287,7 @@ export function TraderMarketClient(props: TraderMarketClientProps) {
   const [isQuoteLoading, setIsQuoteLoading] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
+  const [shardDoc, setShardDoc] = useState<ShardDoc | null>(null)
   const [activeTab, setActiveTab] = useState("positions")
   const [resolvedMatcherAuthority, setResolvedMatcherAuthority] = useState(
     matcherAuthorityAddress,
@@ -308,19 +363,25 @@ export function TraderMarketClient(props: TraderMarketClientProps) {
       if (!shardAddress || !ownerAddress) {
         setDerived({
           engine: null,
+          riskState: null,
+          rails: null,
           lpPool: shardAddress ? await getLpPoolAddress({ shard: shardAddress }) : null,
           trader: null,
         })
         return
       }
 
-      const [engine, lpPool, traderAddress] = await Promise.all([
+      const [engine, riskState, rails, lpPool, traderAddress] = await Promise.all([
         getEngineAddress({ shard: shardAddress }),
+        getRiskStateAddress({ shard: shardAddress }),
+        getRailsAddress({ shard: shardAddress }),
         getLpPoolAddress({ shard: shardAddress }),
         getTraderAddress({ shard: shardAddress, owner: ownerAddress }),
       ])
       setDerived({
         engine,
+        riskState,
+        rails,
         lpPool,
         trader: traderAddress,
       })
@@ -328,6 +389,21 @@ export function TraderMarketClient(props: TraderMarketClientProps) {
 
     void loadDerivedAddresses()
   }, [ownerAddress, shardAddress])
+
+  const refreshShardDoc = useCallback(async () => {
+    if (!props.shard) {
+      setShardDoc(null)
+      return
+    }
+    const doc = await convexQuery<ShardDoc | null>("shards:getByShard", {
+      shard: props.shard,
+    })
+    setShardDoc(doc)
+  }, [props.shard])
+
+  useEffect(() => {
+    void refreshShardDoc()
+  }, [refreshShardDoc])
 
   const refreshTraderView = useCallback(async () => {
     if (!ownerAddress || !props.shard) {
@@ -652,7 +728,14 @@ export function TraderMarketClient(props: TraderMarketClientProps) {
 
   const handleWithdraw = useCallback(async (amountText?: string) => {
     clearMessages()
-    if (!ownerAddress || !shardAddress || !derived.engine || !derived.trader) return
+    if (
+      !ownerAddress ||
+      !shardAddress ||
+      !derived.engine ||
+      !derived.riskState ||
+      !derived.trader
+    )
+      return
 
     const amount = parseFixedDecimal(amountText ?? withdrawInput, 6)
     const maxRemovable = toBigInt(traderView?.account.removableCollateral) ?? 0n
@@ -715,12 +798,57 @@ export function TraderMarketClient(props: TraderMarketClientProps) {
         )
       }
 
+      // Withdraw is freshness-gated by the risk engine. Always bundle a minimal
+      // freshen step so users don't need a separate keeper bot.
+      const quote = await convexAction<{
+        nowSlot: string
+        oraclePrice: string
+      }>("matcher:getQuote", {
+        oracleFeed: oracleFeedAddress,
+        rpcUrl,
+      })
+      const oraclePrice = toBigInt(quote.oraclePrice)
+      if (!oraclePrice) throw new Error("Matcher returned an invalid oracle price")
+
+      instructions.push(
+        getKeeperCrankInstruction({
+          keeper: ownerAddress,
+          oracleFeed: oracleFeedAddress,
+          market: marketAddress,
+          shard: shardAddress,
+          riskState: address(derived.riskState),
+          engine: address(derived.engine),
+          nowSlot: toBigInt(quote.nowSlot) ?? 0n,
+          oraclePrice,
+          orderedCandidates: [],
+          maxRevalidations: 0,
+        }),
+      )
+
+      const [fundingAccumulator, traderFundingState] = await Promise.all([
+        getFundingAccumulatorAddress({ shard: shardAddress }),
+        getTraderFundingStateAddress({ trader: address(derived.trader) }),
+      ])
+      const touchFundingInstruction = getTouchTraderFundingInstruction({
+        signer: ownerAddress,
+        oracleFeed: oracleFeedAddress,
+        market: marketAddress,
+        shard: shardAddress,
+        riskState: address(derived.riskState),
+        trader: address(derived.trader),
+        engine: address(derived.engine),
+        fundingAccumulator,
+        traderFundingState,
+      })
+      instructions.push(touchFundingInstruction)
+
       instructions.push(
         getWithdrawInstruction({
           owner: ownerAddress,
           oracleFeed: oracleFeedAddress,
           market: marketAddress,
           shard: shardAddress,
+          riskState: address(derived.riskState),
           engine: address(derived.engine),
           trader: address(derived.trader),
           collateralMint: collateralMintAddress,
@@ -730,8 +858,18 @@ export function TraderMarketClient(props: TraderMarketClientProps) {
           amount,
         }),
       )
-      await sendAndIndex(instructions)
-      await refreshTraderView()
+      try {
+        await sendAndIndex(instructions)
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Collateral removal failed"
+        if (!isInstructionFallbackNotFoundError(message)) throw error
+
+        // Backward compatibility: if devnet is on an older program deploy that
+        // doesn't support `touch_trader_funding` yet, retry without it.
+        await sendAndIndex(instructions.filter((instruction) => instruction !== touchFundingInstruction))
+      }
+      await Promise.all([refreshTraderView(), refreshShardDoc()])
       setSuccessMessage("Collateral removed.")
       setPositionAction(null)
       setPositionActionAmount("")
@@ -746,10 +884,12 @@ export function TraderMarketClient(props: TraderMarketClientProps) {
     client,
     collateralMintAddress,
     derived.engine,
+    derived.riskState,
     derived.trader,
     marketAddress,
     oracleFeedAddress,
     ownerAddress,
+    refreshShardDoc,
     refreshTraderView,
     sendAndIndex,
     shardAddress,
@@ -763,6 +903,8 @@ export function TraderMarketClient(props: TraderMarketClientProps) {
       !ownerAddress ||
       !shardAddress ||
       !derived.engine ||
+      !derived.riskState ||
+      !derived.rails ||
       !derived.lpPool ||
       !derived.trader ||
       !hybridQuote
@@ -826,21 +968,43 @@ export function TraderMarketClient(props: TraderMarketClientProps) {
         oracleFeed: oracleFeedAddress,
         market: marketAddress,
         shard: shardAddress,
+        riskState: address(derived.riskState),
         engine: address(derived.engine),
         nowSlot: BigInt(quote.nowSlot),
         oraclePrice: BigInt(quote.oraclePrice),
         orderedCandidates: [],
         maxRevalidations: 0,
       })
+
+      const [fundingAccumulator, traderFundingState] = await Promise.all([
+        getFundingAccumulatorAddress({ shard: shardAddress }),
+        getTraderFundingStateAddress({ trader: address(derived.trader) }),
+      ])
+      const touchFundingInstruction = getTouchTraderFundingInstruction({
+        signer: ownerAddress,
+        oracleFeed: oracleFeedAddress,
+        market: marketAddress,
+        shard: shardAddress,
+        riskState: address(derived.riskState),
+        trader: address(derived.trader),
+        engine: address(derived.engine),
+        fundingAccumulator,
+        traderFundingState,
+      })
+
+      const matcherAllowlist = await getMatcherAllowlistAddress({ market: marketAddress })
       const baseInstruction = getExecuteTradeInstruction({
         owner: ownerAddress,
         matcher: resolvedMatcherAuthority,
         oracleFeed: oracleFeedAddress,
         market: marketAddress,
         shard: shardAddress,
+        riskState: address(derived.riskState),
+        rails: address(derived.rails),
         engine: address(derived.engine),
         lpPool: address(derived.lpPool),
         trader: address(derived.trader),
+        matcherAllowlist,
         execPrice,
         sizeQ: tradeSide === "long" ? sizeQAbs : -sizeQAbs,
       })
@@ -855,8 +1019,14 @@ export function TraderMarketClient(props: TraderMarketClientProps) {
                 return { ...account, signer: matcherSigner }
               }),
             }
-      await sendAndIndex([crankInstruction, instruction])
-      await refreshTraderView()
+      try {
+        await sendAndIndex([crankInstruction, touchFundingInstruction, instruction])
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Trade failed"
+        if (!isInstructionFallbackNotFoundError(message)) throw error
+        await sendAndIndex([crankInstruction, instruction])
+      }
+      await Promise.all([refreshTraderView(), refreshShardDoc()])
       setSuccessMessage("Trade executed.")
       setActiveTab("positions")
     } catch (error) {
@@ -868,6 +1038,8 @@ export function TraderMarketClient(props: TraderMarketClientProps) {
     clearMessages,
     desiredNotional,
     derived.engine,
+    derived.riskState,
+    derived.rails,
     derived.lpPool,
     derived.trader,
     hybridQuote,
@@ -875,6 +1047,7 @@ export function TraderMarketClient(props: TraderMarketClientProps) {
     matcherSigner,
     oracleFeedAddress,
     ownerAddress,
+    refreshShardDoc,
     refreshTraderView,
     sendAndIndex,
     shardAddress,
@@ -892,6 +1065,8 @@ export function TraderMarketClient(props: TraderMarketClientProps) {
       !ownerAddress ||
       !shardAddress ||
       !derived.engine ||
+      !derived.riskState ||
+      !derived.rails ||
       !derived.lpPool ||
       !derived.trader
     )
@@ -916,21 +1091,43 @@ export function TraderMarketClient(props: TraderMarketClientProps) {
         oracleFeed: oracleFeedAddress,
         market: marketAddress,
         shard: shardAddress,
+        riskState: address(derived.riskState),
         engine: address(derived.engine),
         nowSlot: BigInt(quote.nowSlot),
         oraclePrice: BigInt(quote.oraclePrice),
         orderedCandidates: [],
         maxRevalidations: 0,
       })
+
+      const [fundingAccumulator, traderFundingState] = await Promise.all([
+        getFundingAccumulatorAddress({ shard: shardAddress }),
+        getTraderFundingStateAddress({ trader: address(derived.trader) }),
+      ])
+      const touchFundingInstruction = getTouchTraderFundingInstruction({
+        signer: ownerAddress,
+        oracleFeed: oracleFeedAddress,
+        market: marketAddress,
+        shard: shardAddress,
+        riskState: address(derived.riskState),
+        trader: address(derived.trader),
+        engine: address(derived.engine),
+        fundingAccumulator,
+        traderFundingState,
+      })
+
+      const matcherAllowlist = await getMatcherAllowlistAddress({ market: marketAddress })
       const baseInstruction = getExecuteTradeInstruction({
         owner: ownerAddress,
         matcher: resolvedMatcherAuthority,
         oracleFeed: oracleFeedAddress,
         market: marketAddress,
         shard: shardAddress,
+        riskState: address(derived.riskState),
+        rails: address(derived.rails),
         engine: address(derived.engine),
         lpPool: address(derived.lpPool),
         trader: address(derived.trader),
+        matcherAllowlist,
         execPrice: BigInt(quote.execPrice),
         sizeQ: position.side === "long" ? -sizeQAbs : sizeQAbs,
       })
@@ -945,8 +1142,14 @@ export function TraderMarketClient(props: TraderMarketClientProps) {
                 return { ...account, signer: matcherSigner }
               }),
             }
-      await sendAndIndex([crankInstruction, instruction])
-      await refreshTraderView()
+      try {
+        await sendAndIndex([crankInstruction, touchFundingInstruction, instruction])
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Close failed"
+        if (!isInstructionFallbackNotFoundError(message)) throw error
+        await sendAndIndex([crankInstruction, instruction])
+      }
+      await Promise.all([refreshTraderView(), refreshShardDoc()])
       setSuccessMessage("Position closed.")
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Close failed")
@@ -956,12 +1159,15 @@ export function TraderMarketClient(props: TraderMarketClientProps) {
   }, [
     clearMessages,
     derived.engine,
+    derived.riskState,
+    derived.rails,
     derived.lpPool,
     derived.trader,
     marketAddress,
     matcherSigner,
     oracleFeedAddress,
     ownerAddress,
+    refreshShardDoc,
     refreshTraderView,
     sendAndIndex,
     shardAddress,
@@ -969,11 +1175,80 @@ export function TraderMarketClient(props: TraderMarketClientProps) {
     traderView?.positions,
   ])
 
+  const handleRefreshFundingPayments = useCallback(async () => {
+    clearMessages()
+    if (!ownerAddress || !shardAddress || !derived.engine || !derived.riskState || !derived.trader)
+      return
+
+    setIsSubmitting(true)
+    try {
+      const [fundingAccumulator, traderFundingState] = await Promise.all([
+        getFundingAccumulatorAddress({ shard: shardAddress }),
+        getTraderFundingStateAddress({ trader: address(derived.trader) }),
+      ])
+      const instruction = getTouchTraderFundingInstruction({
+        signer: ownerAddress,
+        oracleFeed: oracleFeedAddress,
+        market: marketAddress,
+        shard: shardAddress,
+        riskState: address(derived.riskState),
+        trader: address(derived.trader),
+        engine: address(derived.engine),
+        fundingAccumulator,
+        traderFundingState,
+      })
+      try {
+        await sendAndIndex([instruction])
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Funding refresh failed"
+        if (!isInstructionFallbackNotFoundError(message)) throw error
+        setErrorMessage("Funding refresh isn't supported by the current devnet program deploy yet.")
+        return
+      }
+      await Promise.all([refreshTraderView(), refreshShardDoc()])
+      setSuccessMessage("Funding refreshed.")
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Funding refresh failed")
+    } finally {
+      setIsSubmitting(false)
+    }
+  }, [
+    clearMessages,
+    derived.engine,
+    derived.riskState,
+    derived.trader,
+    marketAddress,
+    oracleFeedAddress,
+    ownerAddress,
+    refreshShardDoc,
+    refreshTraderView,
+    sendAndIndex,
+    shardAddress,
+  ])
+
   const hasShard = Boolean(props.shard)
   const hasTrader = Boolean(traderView?.trader) || hasOnchainTraderAccount
   const quoteExecPrice = toBigInt(hybridQuote?.execPrice) ?? 0n
   const quoteOraclePrice = toBigInt(hybridQuote?.oraclePrice) ?? 0n
   const quoteSpreadBps = getDiffBps(quoteExecPrice, quoteOraclePrice)
+  const requestedRailMaxDevBps =
+    desiredNotional <= 0n
+      ? null
+      : desiredNotional <= 250_000_000n
+        ? 40
+        : desiredNotional <= 500_000_000n
+          ? 75
+          : desiredNotional <= 1_000_000_000n
+            ? 120
+            : null
+  const shardOraclePrice = toBigInt(shardDoc?.oraclePrice) ?? 0n
+  const shardRiskPrice = toBigInt(shardDoc?.riskPrice) ?? 0n
+  const fundingRateBpsPerSlot = toBigInt(shardDoc?.fundingRateBpsPerSlot) ?? 0n
+  const riskHaircutBps =
+    shardOraclePrice > 0n && shardRiskPrice > 0n && shardOraclePrice >= shardRiskPrice
+      ? Number(((shardOraclePrice - shardRiskPrice) * 10_000n) / shardOraclePrice)
+      : 0
   const sizePreviewQ =
     quoteExecPrice > 0n && desiredNotional > 0n
       ? (desiredNotional * 1_000_000n) / quoteExecPrice
@@ -1176,12 +1451,27 @@ export function TraderMarketClient(props: TraderMarketClientProps) {
                 </div>
               </div>
             </div>
-            <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-zinc-600 dark:text-zinc-300 md:grid-cols-2">
+            <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-zinc-600 dark:text-zinc-300 md:grid-cols-6">
               <div>
                 Depth served {formatFixedDecimal(toBigInt(hybridQuote?.depthServedNotional) ?? 0n, 6)} USDC
               </div>
               <div>
                 Fallback notional {formatFixedDecimal(toBigInt(hybridQuote?.fallbackNotional) ?? 0n, 6)} USDC
+              </div>
+              <div>
+                Rail max dev{" "}
+                {requestedRailMaxDevBps != null ? `${requestedRailMaxDevBps} bps` : "N/A"}
+              </div>
+              <div>
+                Funding{" "}
+                {fundingRateBpsPerSlot !== 0n ? `${fundingRateBpsPerSlot.toString(10)} bps/slot` : "N/A"}
+              </div>
+              <div>
+                Risk mark{" "}
+                {shardRiskPrice > 0n ? formatFixedDecimal(shardRiskPrice, 6) : "N/A"}
+              </div>
+              <div>
+                Risk haircut {shardRiskPrice > 0n ? `${riskHaircutBps} bps` : "N/A"}
               </div>
             </div>
           </div>
@@ -1551,9 +1841,19 @@ export function TraderMarketClient(props: TraderMarketClientProps) {
 
         <TabsContent value="activity" className="mt-4">
           <section className="rounded-2xl border border-black/10 bg-white p-5 dark:border-white/10 dark:bg-black">
-            <h2 className="text-base font-semibold text-zinc-950 dark:text-zinc-50">
-              Activity
-            </h2>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-base font-semibold text-zinc-950 dark:text-zinc-50">
+                Activity
+              </h2>
+              <button
+                type="button"
+                onClick={() => void handleRefreshFundingPayments()}
+                disabled={!ready || isSubmitting || !hasTrader}
+                className="inline-flex h-9 items-center justify-center rounded-full border border-black/10 px-4 text-sm font-medium text-zinc-950 disabled:opacity-50 dark:border-white/10 dark:text-zinc-50"
+              >
+                Refresh funding
+              </button>
+            </div>
             <div className="mt-4 flex flex-col gap-3">
               {traderView?.activity.length ? (
                 traderView.activity.map((event) => (
@@ -1569,7 +1869,7 @@ export function TraderMarketClient(props: TraderMarketClientProps) {
                         {formatAddress(event.signature)}
                       </span>
                     </div>
-                    {"sizeQ" in event ? (
+                    {event.type === "TradeExecuted" ? (
                       <div className="mt-2 text-zinc-700 dark:text-zinc-200">
                         Size{" "}
                         <span className="font-mono">
@@ -1584,18 +1884,48 @@ export function TraderMarketClient(props: TraderMarketClientProps) {
                           {event.usedFallback ? "yes" : "no"}
                         </span>
                       </div>
-                    ) : "amount" in event ? (
+                    ) : event.type === "Deposit" || event.type === "Withdrawal" ? (
                       <div className="mt-2 text-zinc-700 dark:text-zinc-200">
                         Amount{" "}
                         <span className="font-mono">
                           {formatFixedDecimal(BigInt(event.amount), 6)}
                         </span>
                       </div>
-                    ) : (
+                    ) : event.type === "FundingPayment" ? (
+                      <div className="mt-2 text-zinc-700 dark:text-zinc-200">
+                        Delta{" "}
+                        <span className="font-mono">
+                          {formatSignedFixedDecimal(BigInt(event.deltaFundingPnl), 6)}
+                        </span>{" "}
+                        <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                          cum{" "}
+                          <span className="font-mono">
+                            {formatSignedFixedDecimal(BigInt(event.cumulativeFundingPnl), 6)}
+                          </span>
+                        </span>
+                      </div>
+                    ) : event.type === "TraderClosed" ? (
+                      <div className="mt-2 text-zinc-700 dark:text-zinc-200">
+                        Returned{" "}
+                        <span className="font-mono">
+                          {formatFixedDecimal(BigInt(event.amountReturned), 6)}
+                        </span>
+                      </div>
+                    ) : event.type === "AccountClosed" ? (
+                      <div className="mt-2 text-zinc-700 dark:text-zinc-200">
+                        Returned{" "}
+                        <span className="font-mono">
+                          {formatFixedDecimal(BigInt(event.amountReturned), 6)}
+                        </span>{" "}
+                        <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                          engine {event.engineIndex}
+                        </span>
+                      </div>
+                    ) : "liquidated" in event ? (
                       <div className="mt-2 text-zinc-700 dark:text-zinc-200">
                         Position liquidated: {event.liquidated ? "yes" : "no"}
                       </div>
-                    )}
+                    ) : null}
                   </div>
                 ))
               ) : (

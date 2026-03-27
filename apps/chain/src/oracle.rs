@@ -4,7 +4,7 @@ use crate::errors::UmmoError;
 
 pub const PYTH_RECEIVER_PROGRAM_ID: Address = address!("rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ");
 
-pub const MAX_ORACLE_STALENESS_SLOTS: u64 = 150;
+pub const MAX_ORACLE_STALENESS_SLOTS: u64 = 10_000;
 pub const MAX_ORACLE_CONFIDENCE_BPS: u64 = 200;
 pub const ORACLE_PRICE_DECIMALS: i32 = 6;
 
